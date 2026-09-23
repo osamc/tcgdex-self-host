@@ -63,6 +63,7 @@ main { padding: 1.25rem; }
 .top { display: flex; justify-content: space-between; gap: 1rem; align-items: center; margin-bottom: 1rem; }
 .top h2 { margin: 0; font-size: 1.35rem; }
 .muted { color: var(--muted); }
+.muted.ok, #image-upload-status.ok { color: var(--green); }
 .row-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
 
 .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin-bottom: 1rem; }

@@ -298,7 +298,8 @@ function drawFields() {
       <label class="wide">Optional low-res image (served at /low.webp)
         <input id="image-file-low" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
       </label>
-      <p class="muted wide">Uploads are stored as a TCGdex-style base URL. Clients request <code>/high.webp</code> and <code>/low.webp</code> on that path. One file is used for both unless you add a low-res image.</p>
+      <p class="muted wide" id="image-upload-status"></p>
+      <p class="muted wide">Uploads are stored as a TCGdex-style base URL. Clients request <code>/high.webp</code> and <code>/low.webp</code> on that path. One file is used for both unless you add a low-res image. Save the card after uploading.</p>
       <label class="wide">Public base URL used when an uploaded image is inserted
         <input id="origin" value="${escapeAttr(state.origin)}">
       </label>`
@@ -376,7 +377,7 @@ function applyField() {
 async function uploadImage(event, quality = 'high') {
   const file = event.target.files?.[0]
   if (!file) return
-  const sanitized = file.name.toLowerCase().replace(/[^a-z0-9._-]/g, '')
+  const sanitized = file.name.toLowerCase().replace(/[^a-z0-9._%!-]/g, '')
   const extMatch = sanitized.match(/\.(png|jpe?g|webp|gif)$/)
   if (!extMatch) {
     state.error = 'image must be png, jpg, jpeg, webp, or gif'
@@ -390,6 +391,7 @@ async function uploadImage(event, quality = 'high') {
     return
   }
   const name = quality === 'low' ? `${stem}/low${extMatch[0]}` : `${stem}${extMatch[0]}`
+  const status = app.querySelector('#image-upload-status')
   try {
     const saved = await api(`/manage/api/images/${name.split('/').map(encodeURIComponent).join('/')}`, {
       method: 'PUT',
@@ -401,18 +403,30 @@ async function uploadImage(event, quality = 'high') {
       input.value = `${state.origin}${saved.path}`
       applyField()
     }
+    // Clear so the same file can be chosen again; show status so it does not look like a failed upload.
     event.target.value = ''
     state.error = ''
     const slot = app.querySelector('#form-error')
     if (slot) slot.textContent = ''
+    if (status) {
+      const where = `${state.origin}${saved.path}`
+      status.textContent = quality === 'low'
+        ? `Low-res image stored. Clients will request ${where}/low.webp — save the card to keep the image URL.`
+        : `Uploaded ${file.name}. Image URL set to ${where} — save the card to apply the override.`
+      status.classList.add('ok')
+    }
   } catch (error) {
     state.error = error.message
     app.querySelector('#form-error').textContent = error.message
+    if (status) {
+      status.textContent = ''
+      status.classList.remove('ok')
+    }
   }
 }
 
 function imageStem() {
-  const id = (app.querySelector('[data-field="id"]')?.value || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '')
+  const id = (app.querySelector('[data-field="id"]')?.value || '').trim().toLowerCase().replace(/[^a-z0-9._%!-]/g, '')
   if (id) return id
   const image = app.querySelector('[data-field="image"]')?.value || ''
   const match = image.match(/\/assets\/([^/?#]+?)(?:\.(?:png|jpe?g|webp|gif))?$/i)
@@ -466,7 +480,11 @@ function openEditor(kind, record, lang = 'en', existing = false) {
 function openImport(kind) {
   const lang = prompt('Language code', 'en')
   if (!lang) return
-  const id = prompt(kind === 'cards' ? 'Upstream card id, for example swsh3-136' : 'Upstream id')
+  const id = prompt(
+    kind === 'cards'
+      ? 'Upstream card id (exu-M) or set/localId (exu/M)'
+      : 'Upstream id',
+  )
   if (!id) return
   api('/manage/api/import', { method: 'POST', body: { kind, lang: lang.trim(), id: id.trim() } })
     .then((result) => openEditor(kind, result.record, result.lang, false))

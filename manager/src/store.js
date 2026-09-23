@@ -8,10 +8,17 @@ const KINDS = {
   series: 'series',
 }
 
-const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$/
+// TCGdex ids are mostly [A-Za-z0-9._-], but Unseen Forces Unown cards include
+// punctuation forms such as exu-! and exu-%3F.
+const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._%!-]{0,120}$/
+const LOCAL_ID_PATTERN = /^[A-Za-z0-9._%!-]{1,40}$/
 
 export function isSafeId(value) {
-  return typeof value === 'string' && ID_PATTERN.test(value)
+  return typeof value === 'string' && ID_PATTERN.test(value) && !value.includes('..')
+}
+
+export function isSafeLocalId(value) {
+  return typeof value === 'string' && LOCAL_ID_PATTERN.test(value) && !value.includes('..')
 }
 
 export function createStore(dir) {
@@ -172,8 +179,12 @@ export function validateCard(card) {
   if (!card || typeof card !== 'object' || Array.isArray(card)) {
     return ['card must be a JSON object']
   }
-  if (!isSafeId(String(card.id || ''))) errors.push('id is required and may contain letters, numbers, dots, underscores, and hyphens')
-  if (card.localId == null || card.localId === '') errors.push('localId is required')
+  if (!isSafeId(String(card.id || ''))) {
+    errors.push('id is required and may contain letters, numbers, dots, underscores, hyphens, %, and !')
+  }
+  if (!isSafeLocalId(String(card.localId ?? ''))) {
+    errors.push('localId is required and may contain letters, numbers, dots, underscores, hyphens, %, and !')
+  }
   if (!card.name || typeof card.name !== 'string') errors.push('name is required')
   if (!['Pokemon', 'Energy', 'Trainer'].includes(card.category)) {
     errors.push('category must be Pokemon, Energy, or Trainer')
