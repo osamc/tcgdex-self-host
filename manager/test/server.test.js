@@ -139,6 +139,20 @@ test('uploaded card images are served at high.webp and low.webp', async () => {
     assert.equal(low.status, 200)
     const preview = await fetch(`${base}/assets/demo-001/low.webp`)
     assert.equal(preview.headers.get('content-type'), 'image/webp')
+
+    const other = Buffer.from('second-upload-bytes')
+    const replaced = await fetch(`${base}/manage/api/images/demo-001.webp`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'image/webp' },
+      body: other,
+    })
+    assert.equal(replaced.status, 200)
+    const high = await fetch(`${base}/assets/demo-001/high.webp`)
+    assert.equal(high.headers.get('content-type'), 'image/webp')
+    assert.equal(Buffer.from(await high.arrayBuffer()).toString(), 'second-upload-bytes')
+    const stillLow = await fetch(`${base}/assets/demo-001/low.webp`)
+    assert.equal(stillLow.headers.get('content-type'), 'image/webp')
+    assert.equal(Buffer.compare(Buffer.from(await stillLow.arrayBuffer()), png), 0)
   } finally {
     app.metrics.flush()
     await new Promise((resolve) => app.server.close(resolve))

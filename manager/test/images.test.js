@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { publicAssetPath, publicAssetUrl, resolveImageFile, safeImageRelPath } from '../src/images.js'
+import { publicAssetPath, publicAssetUrl, resolveImageFile, safeImageRelPath, writeImageFile } from '../src/images.js'
 
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
@@ -47,6 +47,24 @@ test('quality suffixes resolve to the uploaded file, with an optional low-res ov
     const preview = resolveImageFile(dataDir, '/assets/demo-001/low.webp')
     assert.equal(path.basename(preview), 'low.webp')
     assert.equal(path.basename(resolveImageFile(dataDir, '/assets/demo-001/high.png')), 'demo-001.png')
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true })
+  }
+})
+
+test('a later upload replaces the previous high image, including a different extension', () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tcgdex-replace-'))
+  const replacement = Buffer.from('replacement-image')
+  try {
+    writeImageFile(dataDir, 'demo-001.png', PNG)
+    writeImageFile(dataDir, 'demo-001/low.webp', PNG)
+    writeImageFile(dataDir, 'demo-001.webp', replacement)
+
+    const served = resolveImageFile(dataDir, '/assets/demo-001/high.webp')
+    assert.equal(path.basename(served), 'demo-001.webp')
+    assert.equal(fs.readFileSync(served).toString(), 'replacement-image')
+    assert.equal(fs.existsSync(path.join(dataDir, 'images', 'demo-001.png')), false)
+    assert.equal(path.basename(resolveImageFile(dataDir, '/assets/demo-001/low.webp')), 'low.webp')
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true })
   }

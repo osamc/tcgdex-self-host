@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { timingSafeEqual } from 'node:crypto'
-import { IMAGE_TYPES, publicAssetPath, resolveImageFile, safeImageRelPath } from './images.js'
+import { IMAGE_TYPES, publicAssetPath, resolveImageFile, safeImageRelPath, writeImageFile } from './images.js'
 import { isLanguage } from './languages.js'
 import { isSafeId, validateCard, validateSerie, validateSet } from './store.js'
 
@@ -32,7 +32,7 @@ export function bearerToken(req) {
 export async function handleManagement(req, res, ctx) {
   const url = new URL(req.url, 'http://manager.local')
   if (url.pathname === '/assets' || url.pathname.startsWith('/assets/')) {
-    serveImage(url.pathname, ctx, res)
+    serveImage(req, url.pathname, ctx, res)
     return true
   }
   if (url.pathname !== '/manage' && !url.pathname.startsWith('/manage/')) return false
@@ -180,26 +180,35 @@ async function handleImageUpload(name, req, res, ctx) {
     sendJson(res, 400, { error: 'empty image' })
     return
   }
-  const dir = path.join(ctx.dataDir, 'images')
-  const file = path.join(dir, safe)
-  fs.mkdirSync(path.dirname(file), { recursive: true })
-  fs.writeFileSync(file, bytes)
+  if (!writeImageFile(ctx.dataDir, safe, bytes)) {
+    sendJson(res, 400, { error: 'image name must be a file such as card.png or card/low.webp' })
+    return
+  }
   sendJson(res, 200, { path: publicAssetPath(safe), file: `/assets/${safe}` })
 }
 
-function serveImage(pathname, ctx, res) {
+function serveImage(req, pathname, ctx, res) {
   const file = resolveImageFile(ctx.dataDir, pathname)
   if (!file) {
     sendJson(res, 404, { error: 'not found' })
     return true
   }
-  const ext = path.extname(file).toLowerCase()
-  res.writeHead(200, {
-    'content-type': IMAGE_TYPES[ext] || 'application/octet-stream',
-    'cache-control': 'public, max-age=86400',
+  const stat = fs.statSync(file)
+  const etag = `"${stat.mtimeMs.toString(16)}-${stat.size.toString(16)}"`
+  const headers = {
+    'content-type': IMAGE_TYPES[path.extname(file).toLowerCase()] || 'application/octet-stream',
+    'cache-control': 'public, max-age=0, must-revalidate',
+    'etag': etag,
+    'last-modified': stat.mtime.toUTCString(),
     'x-content-type-options': 'nosniff',
     'access-control-allow-origin': '*',
-  })
+  }
+  if (req.headers['if-none-match'] === etag) {
+    res.writeHead(304, headers)
+    res.end()
+    return true
+  }
+  res.writeHead(200, headers)
   fs.createReadStream(file).pipe(res)
   return true
 }

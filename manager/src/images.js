@@ -100,32 +100,90 @@ export function resolveImageFile(dataDir, pathname) {
   const parsed = parseAssetRequest(pathname)
   if (!parsed) return null
   const root = path.resolve(dataDir, 'images')
-  for (const file of candidateFiles(root, parsed)) {
-    if (!file.startsWith(root + path.sep)) continue
-    try {
-      if (fs.existsSync(file) && fs.statSync(file).isFile()) return file
-    } catch {
-      // Ignore unreadable candidates and keep looking.
-    }
+  const groups = []
+  if (parsed.quality === 'low') {
+    groups.push(qualityFiles(root, parsed.stem, 'low'))
+    groups.push(qualityFiles(root, parsed.stem, 'high'))
+    groups.push(flatFiles(root, parsed.stem, parsed.requested))
+  } else if (parsed.quality === 'high') {
+    groups.push(qualityFiles(root, parsed.stem, 'high'))
+    groups.push(flatFiles(root, parsed.stem, parsed.requested))
+    groups.push(qualityFiles(root, parsed.stem, 'low'))
+  } else {
+    groups.push(flatFiles(root, parsed.stem, parsed.requested))
+    groups.push(qualityFiles(root, parsed.stem, 'high'))
+    groups.push(qualityFiles(root, parsed.stem, 'low'))
+  }
+  for (const group of groups) {
+    const hit = newestExisting(root, group)
+    if (hit) return hit
   }
   return null
 }
 
-function candidateFiles(root, parsed) {
-  const out = []
-  const add = (...segments) => out.push(path.join(root, ...segments))
-  if (parsed.quality) {
-    add(parsed.stem, `${parsed.quality}${parsed.ext}`)
-    for (const ext of IMAGE_EXTENSIONS) add(parsed.stem, `${parsed.quality}${ext}`)
-    if (parsed.quality === 'low') {
-      add(parsed.stem, `high${parsed.ext}`)
-      for (const ext of IMAGE_EXTENSIONS) add(parsed.stem, `high${ext}`)
+/**
+ * Write an upload and drop earlier files for the same card/quality
+ * so a new png/webp actually replaces the previous image.
+ */
+export function writeImageFile(dataDir, rel, bytes) {
+  const safe = safeImageRelPath(rel)
+  if (!safe) return null
+  const root = path.resolve(dataDir, 'images')
+  const parts = safe.split('/')
+  if (parts.length === 2) {
+    const [stem, file] = parts
+    const quality = path.basename(file, path.extname(file))
+    for (const ext of IMAGE_EXTENSIONS) removeUnder(root, stem, `${quality}${ext}`)
+  } else {
+    const stem = stemOf(parts[0])
+    for (const ext of IMAGE_EXTENSIONS) {
+      removeUnder(root, `${stem}${ext}`)
+      removeUnder(root, stem, `high${ext}`)
     }
   }
-  if (parsed.requested !== parsed.stem) add(parsed.requested)
-  for (const ext of IMAGE_EXTENSIONS) add(`${parsed.stem}${ext}`)
-  for (const quality of QUALITIES) {
-    for (const ext of IMAGE_EXTENSIONS) add(parsed.stem, `${quality}${ext}`)
+  const dest = path.join(root, safe)
+  if (!dest.startsWith(root + path.sep)) return null
+  fs.mkdirSync(path.dirname(dest), { recursive: true })
+  fs.writeFileSync(dest, bytes)
+  return dest
+}
+
+function qualityFiles(root, stem, quality) {
+  return IMAGE_EXTENSIONS.map((ext) => path.join(root, stem, `${quality}${ext}`))
+}
+
+function flatFiles(root, stem, requested) {
+  const files = IMAGE_EXTENSIONS.map((ext) => path.join(root, `${stem}${ext}`))
+  if (requested && requested !== stem) files.unshift(path.join(root, requested))
+  return files
+}
+
+function newestExisting(root, files) {
+  let best = null
+  let bestTime = -1
+  for (const file of files) {
+    if (!file.startsWith(root + path.sep)) continue
+    try {
+      if (!fs.existsSync(file)) continue
+      const stat = fs.statSync(file)
+      if (!stat.isFile()) continue
+      if (stat.mtimeMs >= bestTime) {
+        best = file
+        bestTime = stat.mtimeMs
+      }
+    } catch {
+      // Ignore unreadable candidates and keep looking.
+    }
   }
-  return out
+  return best
+}
+
+function removeUnder(root, ...segments) {
+  const file = path.resolve(root, ...segments)
+  if (!file.startsWith(root + path.sep)) return
+  try {
+    if (fs.existsSync(file) && fs.statSync(file).isFile()) fs.unlinkSync(file)
+  } catch {
+    // A leftover sibling must not block the new upload.
+  }
 }

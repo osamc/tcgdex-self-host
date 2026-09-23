@@ -401,6 +401,10 @@ async function uploadImage(event, quality = 'high') {
       input.value = `${state.origin}${saved.path}`
       applyField()
     }
+    event.target.value = ''
+    state.error = ''
+    const slot = app.querySelector('#form-error')
+    if (slot) slot.textContent = ''
   } catch (error) {
     state.error = error.message
     app.querySelector('#form-error').textContent = error.message
