@@ -1,0 +1,61 @@
+# Self-hosted TCGdex API.
+#
+# The card API is published only on localhost for an existing Caddy server.
+# To attach the manager to Caddy's Docker network as well, add the overlay:
+#   docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d
+
+name: tcgdex
+
+services:
+  tcgdex:
+    image: ${TCGDEX_IMAGE:-tcgdex/server:edge}
+    container_name: tcgdex-server
+    restart: unless-stopped
+    environment:
+      # One worker per CPU unless this cap is set. The upstream compose file uses 2.
+      MAX_WORKERS: ${MAX_WORKERS:-2}
+      # TLS is terminated by the existing Caddy server.
+      DISABLE_HSTS: "1"
+      # Current images throw "TCGCSV_USER_AGENT is not set" and never bind port 3000
+      # unless USER_AGENT or TCGCSV_USER_AGENT is present. The value is sent as
+      # "tcgdex-server/<value>" when price files are downloaded.
+      USER_AGENT: ${TCGDEX_USER_AGENT:-self-hosted-tcgdex}
+    networks:
+      - internal
+    # Workers do not listen until Cardmarket and TCGcsv price files have loaded.
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3000/ping').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 30
+      start_period: 180s
+
+  manager:
+    build: ./manager
+    container_name: tcgdex-manager
+    restart: unless-stopped
+    depends_on:
+      tcgdex:
+        condition: service_healthy
+    environment:
+      UPSTREAM_URL: http://tcgdex:3000
+      MANAGEMENT_TOKEN: ${MANAGEMENT_TOKEN:-}
+      DATA_DIR: /data
+      PORT: "8080"
+      UPSTREAM_CACHE_TTL: ${UPSTREAM_CACHE_TTL:-300}
+    volumes:
+      - ./data:/data
+    ports:
+      - "${MANAGER_BIND:-127.0.0.1}:${MANAGER_PORT:-8080}:8080"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 10s
+
+networks:
+  internal:
+    name: tcgdex-internal

@@ -1,0 +1,35 @@
+{
+  "id": "demo-001",
+  "localId": "001",
+  "name": "Demo Partner",
+  "category": "Pokemon",
+  "illustrator": "Local",
+  "rarity": "Rare",
+  "set": {
+    "id": "demo",
+    "name": "Demo Set"
+  },
+  "variants": {
+    "firstEdition": false,
+    "holo": true,
+    "normal": true,
+    "reverse": false,
+    "wPromo": false
+  },
+  "hp": 60,
+  "types": ["Colorless"],
+  "stage": "Basic",
+  "description": "A card defined on this server. It is not part of the official TCGdex database.",
+  "attacks": [
+    {
+      "cost": ["Colorless"],
+      "name": "Wave",
+      "damage": 20
+    }
+  ],
+  "retreat": 1,
+  "legal": {
+    "standard": false,
+    "expanded": false
+  }
+}

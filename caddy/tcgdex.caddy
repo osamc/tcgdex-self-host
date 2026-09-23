@@ -1,0 +1,25 @@
+# Site block for an existing Caddy server.
+#
+# Import it from the Caddyfile you already run:
+#
+#   import /path/to/this/repo/caddy/tcgdex.caddy
+#
+# Environment expected by that Caddy process:
+#
+#   TCGDEX_HOST=cards.example.com
+#   TCGDEX_UPSTREAM=tcgdex-manager:8080
+#
+# TCGDEX_UPSTREAM depends on where Caddy runs:
+#
+#   Caddy in Docker, on the network named by CADDY_NETWORK
+#     TCGDEX_UPSTREAM=tcgdex-manager:8080
+#     Start this stack with docker-compose.caddy.yml so the manager joins that network.
+#
+#   Caddy on the host
+#     TCGDEX_UPSTREAM=127.0.0.1:8080
+#     Start this stack with docker-compose.yml. The manager listens on localhost only.
+
+{$TCGDEX_HOST} {
+	encode gzip zstd
+	reverse_proxy {$TCGDEX_UPSTREAM:tcgdex-manager:8080}
+}

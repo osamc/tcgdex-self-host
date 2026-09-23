@@ -1,0 +1,16 @@
+# Attach the manager to the Docker network used by an existing Caddy container.
+# The network must already exist. Point CADDY_NETWORK at it (default name: caddy).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d
+#
+# Caddy then reaches the API at http://tcgdex-manager:8080
+
+services:
+  manager:
+    networks:
+      - caddy
+
+networks:
+  caddy:
+    name: ${CADDY_NETWORK:-caddy}
+    external: true
