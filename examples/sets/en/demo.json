@@ -1,0 +1,12 @@
+{
+  "id": "demo",
+  "name": "Demo Set",
+  "serie": {
+    "id": "custom",
+    "name": "Custom"
+  },
+  "releaseDate": "2026-01-01",
+  "cardCount": {
+    "official": 1
+  }
+}

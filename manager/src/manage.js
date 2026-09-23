@@ -1,0 +1,285 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import { timingSafeEqual } from 'node:crypto'
+import { isLanguage } from './languages.js'
+import { isSafeId, validateCard, validateSerie, validateSet } from './store.js'
+
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif'])
+const IMAGE_TYPES = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+}
+
+const VALIDATORS = {
+  cards: validateCard,
+  sets: validateSet,
+  series: validateSerie,
+}
+
+export function tokensMatch(provided, expected) {
+  const left = Buffer.from(String(provided || ''))
+  const right = Buffer.from(String(expected || ''))
+  if (left.length !== right.length) {
+    timingSafeEqual(right, right)
+    return false
+  }
+  return timingSafeEqual(left, right)
+}
+
+export function bearerToken(req) {
+  const header = req.headers.authorization || ''
+  return header.startsWith('Bearer ') ? header.slice(7).trim() : ''
+}
+
+/**
+ * @returns {Promise<boolean>} true when the request was handled
+ */
+export async function handleManagement(req, res, ctx) {
+  const url = new URL(req.url, 'http://manager.local')
+  if (url.pathname === '/assets' || url.pathname.startsWith('/assets/')) {
+    serveImage(url.pathname, ctx, res)
+    return true
+  }
+  if (url.pathname !== '/manage' && !url.pathname.startsWith('/manage/')) return false
+
+  if (url.pathname === '/manage' || url.pathname === '/manage/') {
+    return sendFile(ctx.publicDir, 'index.html', res)
+  }
+  if (url.pathname === '/manage/app.js') return sendFile(ctx.publicDir, 'app.js', res)
+  if (url.pathname === '/manage/style.css') return sendFile(ctx.publicDir, 'style.css', res)
+
+  if (!url.pathname.startsWith('/manage/api/')) {
+    sendJson(res, 404, { error: 'not found' })
+    return true
+  }
+
+  if (!tokensMatch(bearerToken(req), ctx.token)) {
+    sendJson(res, 401, { error: 'unauthorized' })
+    return true
+  }
+
+  const parts = url.pathname.split('/').filter(Boolean)
+  // manage / api / ...
+  const action = parts[2]
+
+  if (req.method === 'GET' && action === 'health') {
+    const upstream = await ctx.upstream.ping()
+    sendJson(res, 200, { upstream: upstream ? 'up' : 'down' })
+    return true
+  }
+  if (req.method === 'GET' && action === 'metrics') {
+    sendJson(res, 200, { ...ctx.metrics.snapshot(), upstream: (await ctx.upstream.ping()) ? 'up' : 'down' })
+    return true
+  }
+  if (req.method === 'GET' && action === 'catalog') {
+    sendJson(res, 200, ctx.store.list())
+    return true
+  }
+  if (req.method === 'POST' && action === 'import') {
+    await handleImport(req, res, ctx)
+    return true
+  }
+  if (action === 'images' && parts[3] && req.method === 'PUT') {
+    await handleImageUpload(parts[3], req, res, ctx)
+    return true
+  }
+  if (['cards', 'sets', 'series'].includes(action)) {
+    await handleCatalogWrite(action, parts[3], parts[4], req, res, ctx)
+    return true
+  }
+
+  sendJson(res, 404, { error: 'not found' })
+  return true
+}
+
+async function handleCatalogWrite(kind, lang, id, req, res, ctx) {
+  if (!isLanguage(lang) || !isSafeId(id || '')) {
+    sendJson(res, 400, { error: 'language or id is invalid' })
+    return
+  }
+  if (req.method === 'GET') {
+    const found = ctx.store.get(kind, lang, id)
+    if (!found) {
+      sendJson(res, 404, { error: 'not found' })
+      return
+    }
+    sendJson(res, 200, found)
+    return
+  }
+  if (req.method === 'DELETE') {
+    const removed = ctx.store.remove(kind, lang, id)
+    sendJson(res, removed ? 200 : 404, removed ? { ok: true } : { error: 'not found' })
+    return
+  }
+  if (req.method !== 'PUT') {
+    sendJson(res, 405, { error: 'method not allowed' })
+    return
+  }
+  const body = await readJson(req, res)
+  if (body == null) return
+  const errors = VALIDATORS[kind](body)
+  if (String(body.id).toLowerCase() !== id.toLowerCase()) errors.push('id in the body must match the URL')
+  if (errors.length) {
+    sendJson(res, 400, { error: 'invalid definition', details: errors })
+    return
+  }
+  const saved = await annotate(kind, lang, id, body, ctx.upstream)
+  ctx.store.put(kind, lang, saved.id, saved)
+  sendJson(res, 200, saved)
+}
+
+async function annotate(kind, lang, id, body, upstream) {
+  const saved = { ...body }
+  delete saved._meta
+  delete saved._lang
+  let upstreamHit = false
+  let upstreamSetId = null
+  try {
+    const existing = await upstream.request(`/v2/${lang}/${kind === 'series' ? 'series' : kind}/${encodeURIComponent(id)}`)
+    upstreamHit = existing.status === 200 && existing.json && typeof existing.json === 'object' && !Array.isArray(existing.json)
+    if (kind === 'cards' && upstreamHit) upstreamSetId = existing.json.set?.id || null
+  } catch {
+    upstreamHit = false
+  }
+  saved._meta = {
+    upstream: upstreamHit,
+    ...(kind === 'cards' ? { upstreamSetId } : {}),
+    savedAt: new Date().toISOString(),
+  }
+  if (!saved.updated) saved.updated = saved._meta.savedAt
+  return saved
+}
+
+async function handleImport(req, res, ctx) {
+  const body = await readJson(req, res)
+  if (body == null) return
+  const kind = body.kind === 'series' ? 'series' : body.kind
+  if (!['cards', 'sets', 'series'].includes(kind) || !isLanguage(body.lang) || !isSafeId(String(body.id || ''))) {
+    sendJson(res, 400, { error: 'kind, lang, and id are required' })
+    return
+  }
+  const endpoint = kind === 'series' ? 'series' : kind
+  try {
+    const existing = await ctx.upstream.request(`/v2/${body.lang}/${endpoint}/${encodeURIComponent(body.id)}`)
+    if (existing.status !== 200 || !existing.json || Array.isArray(existing.json)) {
+      sendJson(res, 404, { error: 'upstream does not have that record' })
+      return
+    }
+    const record = { ...existing.json }
+    delete record.cards
+    delete record.sets
+    sendJson(res, 200, { kind, lang: body.lang, record, upstream: true })
+  } catch {
+    sendJson(res, 502, { error: 'upstream is unavailable' })
+  }
+}
+
+async function handleImageUpload(name, req, res, ctx) {
+  const safe = safeImageName(name)
+  if (!safe) {
+    sendJson(res, 400, { error: 'image name must end in png, jpg, jpeg, webp, or gif' })
+    return
+  }
+  const bytes = await readBody(req, 5_000_000)
+  if (!bytes?.length) {
+    sendJson(res, 400, { error: 'empty image' })
+    return
+  }
+  const dir = path.join(ctx.dataDir, 'images')
+  fs.mkdirSync(dir, { recursive: true })
+  const file = path.join(dir, safe)
+  fs.writeFileSync(file, bytes)
+  sendJson(res, 200, { path: `/assets/${safe}` })
+}
+
+function serveImage(pathname, ctx, res) {
+  const name = safeImageName(pathname.split('/').pop())
+  if (!name) {
+    sendJson(res, 404, { error: 'not found' })
+    return true
+  }
+  const file = path.join(ctx.dataDir, 'images', name)
+  if (!file.startsWith(path.join(ctx.dataDir, 'images') + path.sep) || !fs.existsSync(file)) {
+    sendJson(res, 404, { error: 'not found' })
+    return true
+  }
+  const ext = path.extname(name)
+  res.writeHead(200, {
+    'content-type': IMAGE_TYPES[ext],
+    'cache-control': 'public, max-age=86400',
+    'x-content-type-options': 'nosniff',
+  })
+  fs.createReadStream(file).pipe(res)
+  return true
+}
+
+function safeImageName(name) {
+  if (!name || name !== path.basename(name)) return null
+  const lower = name.toLowerCase()
+  const ext = path.extname(lower)
+  if (!IMAGE_EXTENSIONS.has(ext)) return null
+  if (!/^[a-z0-9][a-z0-9._-]{0,80}$/.test(lower)) return null
+  return lower
+}
+
+function sendFile(publicDir, name, res) {
+  const file = path.resolve(publicDir, name)
+  if (!file.startsWith(`${path.resolve(publicDir)}${path.sep}`)) {
+    sendJson(res, 403, { error: 'forbidden' })
+    return true
+  }
+  const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' }
+  res.writeHead(200, {
+    'content-type': types[path.extname(name)] || 'application/octet-stream',
+    'cache-control': 'no-cache',
+  })
+  fs.createReadStream(file).pipe(res)
+  return true
+}
+
+export function sendJson(res, status, body, headers = {}) {
+  const payload = JSON.stringify(body)
+  res.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'content-length': Buffer.byteLength(payload),
+    'cache-control': 'no-store',
+    ...headers,
+  })
+  res.end(payload)
+}
+
+export async function readJson(req, res) {
+  try {
+    const raw = await readBody(req, 1_000_000)
+    if (!raw) {
+      sendJson(res, 400, { error: 'expected a JSON body' })
+      return null
+    }
+    return JSON.parse(raw.toString('utf8'))
+  } catch (error) {
+    const status = error.status || 400
+    sendJson(res, status, { error: status === 413 ? 'payload too large' : 'invalid JSON' })
+    return null
+  }
+}
+
+export function readBody(req, limit) {
+  return new Promise((resolve, reject) => {
+    const chunks = []
+    let size = 0
+    req.on('data', (chunk) => {
+      size += chunk.length
+      if (size > limit) {
+        reject(Object.assign(new Error('payload too large'), { status: 413 }))
+        req.destroy()
+        return
+      }
+      chunks.push(chunk)
+    })
+    req.on('end', () => resolve(Buffer.concat(chunks)))
+    req.on('error', reject)
+  })
+}
