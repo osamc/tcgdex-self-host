@@ -1,0 +1,1 @@
+# tcgdex-self-host
