@@ -95,6 +95,72 @@ test('management API saves a card, serves it, and counts the request', async () 
   }
 })
 
+test('uploaded card images are served at high.webp and low.webp', async () => {
+  const upstream = await listen((req, res) => {
+    res.writeHead(404)
+    res.end()
+  })
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tcgdex-assets-'))
+  const app = createApp({
+    token: TOKEN,
+    dataDir,
+    upstreamUrl: upstream.url,
+    cacheTtlSeconds: 0,
+    publicDir: path.join(import.meta.dirname, '..', 'public'),
+  })
+  await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${app.server.address().port}`
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64',
+  )
+
+  try {
+    const uploaded = await fetch(`${base}/manage/api/images/demo-001.png`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'image/png' },
+      body: png,
+    })
+    assert.equal(uploaded.status, 200)
+    assert.deepEqual(await uploaded.json(), { path: '/assets/demo-001', file: '/assets/demo-001.png' })
+
+    for (const asset of ['/assets/demo-001', '/assets/demo-001/high.webp', '/assets/demo-001/low.webp', '/assets/demo-001.png']) {
+      const response = await fetch(`${base}${asset}`)
+      assert.equal(response.status, 200, asset)
+      assert.equal(response.headers.get('content-type'), 'image/png')
+      assert.equal(Buffer.compare(Buffer.from(await response.arrayBuffer()), png), 0)
+    }
+
+    const low = await fetch(`${base}/manage/api/images/demo-001/low.webp`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'image/webp' },
+      body: png,
+    })
+    assert.equal(low.status, 200)
+    const preview = await fetch(`${base}/assets/demo-001/low.webp`)
+    assert.equal(preview.headers.get('content-type'), 'image/webp')
+
+    const other = Buffer.from('second-upload-bytes')
+    const replaced = await fetch(`${base}/manage/api/images/demo-001.webp`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'image/webp' },
+      body: other,
+    })
+    assert.equal(replaced.status, 200)
+    const high = await fetch(`${base}/assets/demo-001/high.webp`)
+    assert.equal(high.headers.get('content-type'), 'image/webp')
+    assert.equal(Buffer.from(await high.arrayBuffer()).toString(), 'second-upload-bytes')
+    const stillLow = await fetch(`${base}/assets/demo-001/low.webp`)
+    assert.equal(stillLow.headers.get('content-type'), 'image/webp')
+    assert.equal(Buffer.compare(Buffer.from(await stillLow.arrayBuffer()), png), 0)
+  } finally {
+    app.metrics.flush()
+    await new Promise((resolve) => app.server.close(resolve))
+    await new Promise((resolve) => upstream.server.close(resolve))
+    fs.rmSync(dataDir, { recursive: true, force: true })
+  }
+})
+
 test('a short management token is rejected at startup', () => {
   assert.throws(() => createApp({
     token: 'too-short',

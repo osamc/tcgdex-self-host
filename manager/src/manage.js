@@ -1,17 +1,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { timingSafeEqual } from 'node:crypto'
+import { IMAGE_TYPES, publicAssetPath, resolveImageFile, safeImageRelPath, writeImageFile } from './images.js'
 import { isLanguage } from './languages.js'
 import { isSafeId, validateCard, validateSerie, validateSet } from './store.js'
-
-const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif'])
-const IMAGE_TYPES = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.webp': 'image/webp',
-  '.gif': 'image/gif',
-}
 
 const VALIDATORS = {
   cards: validateCard,
@@ -40,7 +32,7 @@ export function bearerToken(req) {
 export async function handleManagement(req, res, ctx) {
   const url = new URL(req.url, 'http://manager.local')
   if (url.pathname === '/assets' || url.pathname.startsWith('/assets/')) {
-    serveImage(url.pathname, ctx, res)
+    serveImage(req, url.pathname, ctx, res)
     return true
   }
   if (url.pathname !== '/manage' && !url.pathname.startsWith('/manage/')) return false
@@ -83,7 +75,7 @@ export async function handleManagement(req, res, ctx) {
     return true
   }
   if (action === 'images' && parts[3] && req.method === 'PUT') {
-    await handleImageUpload(parts[3], req, res, ctx)
+    await handleImageUpload(parts.slice(3).join('/'), req, res, ctx)
     return true
   }
   if (['cards', 'sets', 'series'].includes(action)) {
@@ -178,9 +170,9 @@ async function handleImport(req, res, ctx) {
 }
 
 async function handleImageUpload(name, req, res, ctx) {
-  const safe = safeImageName(name)
+  const safe = safeImageRelPath(name)
   if (!safe) {
-    sendJson(res, 400, { error: 'image name must end in png, jpg, jpeg, webp, or gif' })
+    sendJson(res, 400, { error: 'image name must be a file such as card.png or card/low.webp' })
     return
   }
   const bytes = await readBody(req, 5_000_000)
@@ -188,41 +180,37 @@ async function handleImageUpload(name, req, res, ctx) {
     sendJson(res, 400, { error: 'empty image' })
     return
   }
-  const dir = path.join(ctx.dataDir, 'images')
-  fs.mkdirSync(dir, { recursive: true })
-  const file = path.join(dir, safe)
-  fs.writeFileSync(file, bytes)
-  sendJson(res, 200, { path: `/assets/${safe}` })
+  if (!writeImageFile(ctx.dataDir, safe, bytes)) {
+    sendJson(res, 400, { error: 'image name must be a file such as card.png or card/low.webp' })
+    return
+  }
+  sendJson(res, 200, { path: publicAssetPath(safe), file: `/assets/${safe}` })
 }
 
-function serveImage(pathname, ctx, res) {
-  const name = safeImageName(pathname.split('/').pop())
-  if (!name) {
+function serveImage(req, pathname, ctx, res) {
+  const file = resolveImageFile(ctx.dataDir, pathname)
+  if (!file) {
     sendJson(res, 404, { error: 'not found' })
     return true
   }
-  const file = path.join(ctx.dataDir, 'images', name)
-  if (!file.startsWith(path.join(ctx.dataDir, 'images') + path.sep) || !fs.existsSync(file)) {
-    sendJson(res, 404, { error: 'not found' })
-    return true
-  }
-  const ext = path.extname(name)
-  res.writeHead(200, {
-    'content-type': IMAGE_TYPES[ext],
-    'cache-control': 'public, max-age=86400',
+  const stat = fs.statSync(file)
+  const etag = `"${stat.mtimeMs.toString(16)}-${stat.size.toString(16)}"`
+  const headers = {
+    'content-type': IMAGE_TYPES[path.extname(file).toLowerCase()] || 'application/octet-stream',
+    'cache-control': 'public, max-age=0, must-revalidate',
+    'etag': etag,
+    'last-modified': stat.mtime.toUTCString(),
     'x-content-type-options': 'nosniff',
-  })
+    'access-control-allow-origin': '*',
+  }
+  if (req.headers['if-none-match'] === etag) {
+    res.writeHead(304, headers)
+    res.end()
+    return true
+  }
+  res.writeHead(200, headers)
   fs.createReadStream(file).pipe(res)
   return true
-}
-
-function safeImageName(name) {
-  if (!name || name !== path.basename(name)) return null
-  const lower = name.toLowerCase()
-  const ext = path.extname(lower)
-  if (!IMAGE_EXTENSIONS.has(ext)) return null
-  if (!/^[a-z0-9][a-z0-9._-]{0,80}$/.test(lower)) return null
-  return lower
 }
 
 function sendFile(publicDir, name, res) {

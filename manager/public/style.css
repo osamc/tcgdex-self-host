@@ -87,6 +87,8 @@ th { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-
 .editor { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; }
 .fields .wide { grid-column: 1 / -1; }
+.fields p.muted { margin: 0; }
+.fields code { font-size: 0.85em; }
 .checks { display: flex; flex-wrap: wrap; gap: 0.8rem; }
 
 .login { max-width: 420px; margin: 12vh auto; padding: 1.5rem; }
