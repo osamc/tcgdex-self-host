@@ -280,7 +280,7 @@ function drawFields() {
       </label>
       ${textField('set.id', 'Set id', record.set?.id || '')}
       ${textField('set.name', 'Set name', record.set?.name || '')}
-      ${textField('image', 'Image URL', record.image || '', true)}
+      ${textField('image', 'Image URL (base path — clients append /high.webp or /low.webp)', record.image || '', true)}
       ${textField('hp', 'HP', record.hp ?? '')}
       ${textField('types', 'Types (comma separated)', (record.types || []).join(', '))}
       ${textField('rarity', 'Rarity', record.rarity || '')}
@@ -295,6 +295,10 @@ function drawFields() {
       <label class="wide">Card image file
         <input id="image-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
       </label>
+      <label class="wide">Optional low-res image (served at /low.webp)
+        <input id="image-file-low" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
+      </label>
+      <p class="muted wide">Uploads are stored as a TCGdex-style base URL. Clients request <code>/high.webp</code> and <code>/low.webp</code> on that path. One file is used for both unless you add a low-res image.</p>
       <label class="wide">Public base URL used when an uploaded image is inserted
         <input id="origin" value="${escapeAttr(state.origin)}">
       </label>`
@@ -321,7 +325,8 @@ function drawFields() {
     input.addEventListener('change', applyField)
   })
   fields.querySelectorAll('[data-variant]').forEach((input) => input.addEventListener('change', applyField))
-  fields.querySelector('#image-file')?.addEventListener('change', uploadImage)
+  fields.querySelector('#image-file')?.addEventListener('change', (event) => uploadImage(event, 'high'))
+  fields.querySelector('#image-file-low')?.addEventListener('change', (event) => uploadImage(event, 'low'))
   fields.querySelector('#origin')?.addEventListener('change', (event) => {
     state.origin = event.target.value.replace(/\/$/, '')
     localStorage.setItem('tcgdex-origin', state.origin)
@@ -368,18 +373,31 @@ function applyField() {
   app.querySelector('#json').value = JSON.stringify(record, null, 2)
 }
 
-async function uploadImage(event) {
+async function uploadImage(event, quality = 'high') {
   const file = event.target.files?.[0]
   if (!file) return
-  const name = file.name.toLowerCase().replace(/[^a-z0-9._-]/g, '')
+  const sanitized = file.name.toLowerCase().replace(/[^a-z0-9._-]/g, '')
+  const extMatch = sanitized.match(/\.(png|jpe?g|webp|gif)$/)
+  if (!extMatch) {
+    state.error = 'image must be png, jpg, jpeg, webp, or gif'
+    app.querySelector('#form-error').textContent = state.error
+    return
+  }
+  const stem = imageStem() || sanitized.slice(0, -extMatch[0].length)
+  if (!stem) {
+    state.error = 'set the card id before uploading an image'
+    app.querySelector('#form-error').textContent = state.error
+    return
+  }
+  const name = quality === 'low' ? `${stem}/low${extMatch[0]}` : `${stem}${extMatch[0]}`
   try {
-    const saved = await api(`/manage/api/images/${encodeURIComponent(name)}`, {
+    const saved = await api(`/manage/api/images/${name.split('/').map(encodeURIComponent).join('/')}`, {
       method: 'PUT',
       headers: { 'content-type': file.type || 'application/octet-stream' },
       body: file,
     })
     const input = app.querySelector('[data-field="image"]')
-    if (input) {
+    if (input && saved.path) {
       input.value = `${state.origin}${saved.path}`
       applyField()
     }
@@ -387,6 +405,14 @@ async function uploadImage(event) {
     state.error = error.message
     app.querySelector('#form-error').textContent = error.message
   }
+}
+
+function imageStem() {
+  const id = (app.querySelector('[data-field="id"]')?.value || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '')
+  if (id) return id
+  const image = app.querySelector('[data-field="image"]')?.value || ''
+  const match = image.match(/\/assets\/([^/?#]+?)(?:\.(?:png|jpe?g|webp|gif))?$/i)
+  return match ? match[1].toLowerCase() : ''
 }
 
 async function saveDraft() {

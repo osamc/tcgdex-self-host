@@ -88,7 +88,16 @@ A saved card uses the same JSON shape as `GET /v2/{lang}/cards/{id}`. Saving an 
 
 To override an official card, use **Import upstream** in the UI (for example `swsh3-136`), edit the JSON, and save.
 
-Uploaded images are served at `/assets/<filename>`. Put the public site origin in the editor's base URL field so the card's `image` value is an absolute URL.
+Uploaded images are served from `/assets/<name>`. The card `image` field is stored as that base path, without a file extension, matching official TCGdex. Clients then request:
+
+```text
+https://cards.example.com/assets/<name>/high.webp
+https://cards.example.com/assets/<name>/low.webp
+```
+
+`/high.png` and `/low.png` work the same way. A single upload is used for both qualities. To serve a smaller preview, upload a low-res file in the editor or add `data/images/<name>/low.webp`. Existing `/assets/<file>.png` values are rewritten to the extensionless form in API responses so SDKs that append `/high.webp` keep working.
+
+Put the public site origin in the editor's base URL field so the card's `image` value is an absolute URL.
 
 These REST paths include the local catalog:
 

@@ -1,17 +1,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { timingSafeEqual } from 'node:crypto'
+import { IMAGE_TYPES, publicAssetPath, resolveImageFile, safeImageRelPath } from './images.js'
 import { isLanguage } from './languages.js'
 import { isSafeId, validateCard, validateSerie, validateSet } from './store.js'
-
-const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif'])
-const IMAGE_TYPES = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.webp': 'image/webp',
-  '.gif': 'image/gif',
-}
 
 const VALIDATORS = {
   cards: validateCard,
@@ -83,7 +75,7 @@ export async function handleManagement(req, res, ctx) {
     return true
   }
   if (action === 'images' && parts[3] && req.method === 'PUT') {
-    await handleImageUpload(parts[3], req, res, ctx)
+    await handleImageUpload(parts.slice(3).join('/'), req, res, ctx)
     return true
   }
   if (['cards', 'sets', 'series'].includes(action)) {
@@ -178,9 +170,9 @@ async function handleImport(req, res, ctx) {
 }
 
 async function handleImageUpload(name, req, res, ctx) {
-  const safe = safeImageName(name)
+  const safe = safeImageRelPath(name)
   if (!safe) {
-    sendJson(res, 400, { error: 'image name must end in png, jpg, jpeg, webp, or gif' })
+    sendJson(res, 400, { error: 'image name must be a file such as card.png or card/low.webp' })
     return
   }
   const bytes = await readBody(req, 5_000_000)
@@ -189,40 +181,27 @@ async function handleImageUpload(name, req, res, ctx) {
     return
   }
   const dir = path.join(ctx.dataDir, 'images')
-  fs.mkdirSync(dir, { recursive: true })
   const file = path.join(dir, safe)
+  fs.mkdirSync(path.dirname(file), { recursive: true })
   fs.writeFileSync(file, bytes)
-  sendJson(res, 200, { path: `/assets/${safe}` })
+  sendJson(res, 200, { path: publicAssetPath(safe), file: `/assets/${safe}` })
 }
 
 function serveImage(pathname, ctx, res) {
-  const name = safeImageName(pathname.split('/').pop())
-  if (!name) {
+  const file = resolveImageFile(ctx.dataDir, pathname)
+  if (!file) {
     sendJson(res, 404, { error: 'not found' })
     return true
   }
-  const file = path.join(ctx.dataDir, 'images', name)
-  if (!file.startsWith(path.join(ctx.dataDir, 'images') + path.sep) || !fs.existsSync(file)) {
-    sendJson(res, 404, { error: 'not found' })
-    return true
-  }
-  const ext = path.extname(name)
+  const ext = path.extname(file).toLowerCase()
   res.writeHead(200, {
-    'content-type': IMAGE_TYPES[ext],
+    'content-type': IMAGE_TYPES[ext] || 'application/octet-stream',
     'cache-control': 'public, max-age=86400',
     'x-content-type-options': 'nosniff',
+    'access-control-allow-origin': '*',
   })
   fs.createReadStream(file).pipe(res)
   return true
-}
-
-function safeImageName(name) {
-  if (!name || name !== path.basename(name)) return null
-  const lower = name.toLowerCase()
-  const ext = path.extname(lower)
-  if (!IMAGE_EXTENSIONS.has(ext)) return null
-  if (!/^[a-z0-9][a-z0-9._-]{0,80}$/.test(lower)) return null
-  return lower
 }
 
 function sendFile(publicDir, name, res) {

@@ -172,6 +172,34 @@ test('pagination is applied after custom cards are merged', async () => {
   assert.deepEqual(page.body.map((card) => card.id), ['demo-001'])
 })
 
+test('local asset image URLs are published as an extensionless base path', async () => {
+  const custom = {
+    id: 'demo-001',
+    localId: '001',
+    name: 'Demo Partner',
+    category: 'Pokemon',
+    image: 'https://cards.example/assets/demo-001.png',
+    set: { id: 'demo', name: 'Demo Set' },
+    variants: { normal: true },
+  }
+  const fetchUpstream = async () => ({ status: 404, json: { status: 404 }, text: '' })
+  const detail = await resolveRequest({
+    method: 'GET',
+    targetUrl: '/v2/en/cards/demo-001',
+    store: store({ cards: [custom] }),
+    fetchUpstream,
+  })
+  assert.equal(detail.body.image, 'https://cards.example/assets/demo-001')
+
+  const list = await resolveRequest({
+    method: 'GET',
+    targetUrl: '/v2/en/cards?name=eq:Demo Partner',
+    store: store({ cards: [custom] }),
+    fetchUpstream,
+  })
+  assert.equal(list.body[0].image, 'https://cards.example/assets/demo-001')
+})
+
 test('requests stay untouched when the catalog is empty', async () => {
   let called = false
   const result = await resolveRequest({

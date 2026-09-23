@@ -1,5 +1,8 @@
+import { publicAssetUrl } from './images.js'
 import { isLanguage } from './languages.js'
 import { matches, paginate, parseQuery, sortItems, uniqueSorted, withoutPagination } from './query.js'
+
+const MEDIA_KEYS = new Set(['image', 'logo', 'symbol'])
 
 const CARD_SORTS = new Set(['id', 'localId', 'name', 'image'])
 const SET_SORTS = new Set(['id', 'name', 'logo', 'symbol'])
@@ -37,6 +40,10 @@ export function stripMeta(value) {
   const copy = {}
   for (const [key, child] of Object.entries(value)) {
     if (key === '_meta' || key === '_lang') continue
+    if (MEDIA_KEYS.has(key) && typeof child === 'string') {
+      copy[key] = publicAssetUrl(child)
+      continue
+    }
     copy[key] = stripMeta(child)
   }
   return copy
@@ -48,7 +55,7 @@ export function cardBrief(card) {
     localId: card.localId,
     name: card.name,
   }
-  if (card.image) brief.image = card.image
+  if (card.image) brief.image = publicAssetUrl(card.image)
   return brief
 }
 
@@ -297,8 +304,8 @@ function briefForSet(set, cards, upstreamBrief) {
     name: set.name,
     cardCount: countForSet(upstreamBrief?.cardCount, set, null, cards, !upstreamBrief),
   }
-  const logo = set.logo || upstreamBrief?.logo
-  const symbol = set.symbol || upstreamBrief?.symbol
+  const logo = publicAssetUrl(set.logo || upstreamBrief?.logo)
+  const symbol = publicAssetUrl(set.symbol || upstreamBrief?.symbol)
   if (logo) brief.logo = logo
   if (symbol) brief.symbol = symbol
   return brief
@@ -411,7 +418,7 @@ function mergeSerieSets(upstreamSets, serieId, customSets, customCards) {
 
 function serieBrief(serie) {
   const brief = { id: serie.id, name: serie.name }
-  if (serie.logo) brief.logo = serie.logo
+  if (serie.logo) brief.logo = publicAssetUrl(serie.logo)
   return brief
 }
 
