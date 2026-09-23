@@ -298,7 +298,7 @@ function drawFields() {
       <label class="wide">Optional low-res image (served at /low.webp)
         <input id="image-file-low" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
       </label>
-      <p class="muted wide" id="image-upload-status"></p>
+      <p class="upload-status wide" id="image-upload-status" hidden></p>
       <p class="muted wide">Uploads are stored as a TCGdex-style base URL. Clients request <code>/high.webp</code> and <code>/low.webp</code> on that path. One file is used for both unless you add a low-res image. Save the card after uploading.</p>
       <label class="wide">Public base URL used when an uploaded image is inserted
         <input id="origin" value="${escapeAttr(state.origin)}">
@@ -410,17 +410,17 @@ async function uploadImage(event, quality = 'high') {
     if (slot) slot.textContent = ''
     if (status) {
       const where = `${state.origin}${saved.path}`
+      status.hidden = false
       status.textContent = quality === 'low'
-        ? `Low-res image stored. Clients will request ${where}/low.webp — save the card to keep the image URL.`
-        : `Uploaded ${file.name}. Image URL set to ${where} — save the card to apply the override.`
-      status.classList.add('ok')
+        ? `Low-res image stored. Clients will request ${where}/low.webp. Save the card to keep the image URL.`
+        : `Uploaded ${file.name}. Image URL set to ${where}. Save the card to apply the override.`
     }
   } catch (error) {
     state.error = error.message
     app.querySelector('#form-error').textContent = error.message
     if (status) {
       status.textContent = ''
-      status.classList.remove('ok')
+      status.hidden = true
     }
   }
 }
