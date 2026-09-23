@@ -16,15 +16,19 @@ services:
       MAX_WORKERS: ${MAX_WORKERS:-2}
       # TLS is terminated by the existing Caddy server.
       DISABLE_HSTS: "1"
+      # Current images throw "TCGCSV_USER_AGENT is not set" and never bind port 3000
+      # unless USER_AGENT or TCGCSV_USER_AGENT is present. The value is sent as
+      # "tcgdex-server/<value>" when price files are downloaded.
+      USER_AGENT: ${TCGDEX_USER_AGENT:-self-hosted-tcgdex}
     networks:
       - internal
-    # The image listens only after it has downloaded Cardmarket and TCGplayer price files.
+    # Workers do not listen until Cardmarket and TCGcsv price files have loaded.
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3000/ping').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
-      interval: 15s
+      interval: 20s
       timeout: 5s
-      retries: 20
-      start_period: 45s
+      retries: 30
+      start_period: 180s
 
   manager:
     build: ./manager

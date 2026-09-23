@@ -18,7 +18,9 @@ The API and the management UI listen on `127.0.0.1:8080`. The TCGdex container i
 - Health: `http://127.0.0.1:8080/healthz`
 - Management UI: `http://127.0.0.1:8080/manage`
 
-The first start waits until the TCGdex process has downloaded Cardmarket and TCGplayer price files. The container needs outbound HTTPS for those downloads, and it will not accept traffic until they finish.
+The first start waits until Cardmarket and TCGcsv price files have downloaded. Current images do not open port 3000 until both feeds load, and they refuse to start the TCGcsv client unless `TCGDEX_USER_AGENT` is set. The container needs outbound HTTPS to `downloads.s3.cardmarket.com` and `tcgcsv.com`.
+
+If those hosts cannot be reached, the official process never listens. Add `CI: "true"` to the `tcgdex` service environment to serve the card database without market prices. That variable is how the upstream image skips the price client.
 
 ## Existing Caddy
 
@@ -105,6 +107,7 @@ List filters use the TCGdex operators (`name=pikachu`, `name=eq:Furret`, `hp=gte
 | --- | --- |
 | `TCGDEX_IMAGE` | Image to run. Default `tcgdex/server:edge`. |
 | `MAX_WORKERS` | TCGdex worker processes. Default `2`. |
+| `TCGDEX_USER_AGENT` | Contact string sent when downloading TCGcsv prices. Default `self-hosted-tcgdex`. |
 | `UPSTREAM_CACHE_TTL` | Seconds to cache upstream JSON before merging custom records. Default `300`. |
 | `MANAGEMENT_TOKEN` | Required. At least 16 characters. |
 | `MANAGER_BIND` / `MANAGER_PORT` | Host address for the manager. Default `127.0.0.1:8080`. |

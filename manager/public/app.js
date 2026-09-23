@@ -136,7 +136,7 @@ function dashboardHtml() {
   }).join('')
   const windowCell = (label, stats) => `
     <article class="stat"><span>${label}</span><b>${stats.count}</b>
-      <span>${stats.errors} errors · avg ${stats.avgMs} ms · p95 ${stats.p95Ms} ms</span></article>`
+      <span class="detail">${stats.errors} errors · avg ${stats.avgMs} ms · p95 ${stats.p95Ms} ms</span></article>`
   const paths = metrics.paths.length
     ? metrics.paths.map((row) => `<tr><td>${escapeHtml(row.path)}</td><td>${row.count}</td></tr>`).join('')
     : '<tr><td colspan="2">No API traffic recorded yet.</td></tr>'
@@ -162,7 +162,7 @@ function dashboardHtml() {
       ${windowCell('Last minute', metrics.windows['1m'])}
       ${windowCell('Last 15 minutes', metrics.windows['15m'])}
       ${windowCell('Last 24 hours', metrics.windows['24h'])}
-      <article class="stat"><span>Catalog</span><b>${state.catalog.cards.length}</b><span>${state.catalog.sets.length} sets · ${state.catalog.series.length} series</span></article>
+      <article class="stat"><span>Catalog</span><b>${state.catalog.cards.length}</b><span class="detail">${state.catalog.sets.length} sets · ${state.catalog.series.length} series</span></article>
     </section>
     <section class="panel">
       <h3>Requests per minute</h3>
