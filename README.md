@@ -65,6 +65,8 @@ Open `/manage` and enter `MANAGEMENT_TOKEN`. The token is only required for the 
 
 The dashboard shows request counts, error counts, average latency, an approximate p95 from recent samples, the busiest paths, and the latest calls. Counts are kept for 24 hours in `data/metrics.json`.
 
+**Deck test** parses a PTCGL or Limitless list with [pokemon-tcg-deck-parser](https://www.npmjs.com/package/pokemon-tcg-deck-parser) against this server. Each resolved card is shown with the image the library received, including custom and overridden prints.
+
 ## Custom cards, sets, and series
 
 Create records in the UI, or copy the examples into the data directory and restart is not required (the manager watches the folder):
@@ -155,7 +157,7 @@ List filters use the TCGdex operators (`name=pikachu`, `name=eq:Furret`, `hp=gte
 
 ## Development
 
-The manager runtime has no dependencies. Tests use a fake upstream and do not need Docker. They also install `pokemon-tcg-deck-parser` to check the preseeded Unown card:
+The manager runtime depends on `pokemon-tcg-deck-parser` for the deck test page. Tests use a fake upstream and do not need Docker:
 
 ```bash
 cd manager

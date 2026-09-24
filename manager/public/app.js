@@ -10,6 +10,13 @@ const state = {
   error: '',
   origin: localStorage.getItem('tcgdex-origin') || location.origin,
   timer: null,
+  deck: {
+    lang: 'en',
+    text: 'Pokémon: 24\n2 Unown UF M\n',
+    result: null,
+    error: '',
+    busy: false,
+  },
 }
 
 boot()
@@ -93,6 +100,7 @@ function render() {
         ${navButton('cards', 'Cards')}
         ${navButton('sets', 'Sets')}
         ${navButton('series', 'Series')}
+        ${navButton('deck', 'Deck test')}
         <button type="button" id="lock">Lock</button>
       </aside>
       <main id="main"></main>
@@ -111,7 +119,9 @@ function render() {
   })
   const main = app.querySelector('#main')
   if (state.tab === 'dashboard') main.innerHTML = dashboardHtml()
+  else if (state.tab === 'deck') main.innerHTML = deckHtml()
   else main.innerHTML = catalogHtml(state.tab)
+  bindDeck(main)
   main.querySelector('[data-new]')?.addEventListener('click', () => openEditor(state.tab, blank(state.tab)))
   main.querySelector('[data-import]')?.addEventListener('click', () => openImport(state.tab))
   main.querySelector('[data-import-json]')?.addEventListener('click', () => openJsonImport(state.tab))
@@ -121,6 +131,120 @@ function render() {
   })
   main.querySelectorAll('[data-delete]').forEach((button) => {
     button.addEventListener('click', () => removeRecord(state.tab, button.dataset.lang, button.dataset.delete))
+  })
+}
+
+const DECK_SAMPLE = 'Pokémon: 24\n2 Unown UF M\n'
+
+function deckHtml() {
+  const deck = state.deck
+  const result = deck.result
+  const unique = result ? result.cards.length : 0
+  const unresolved = result ? result.cards.filter((card) => !card.resolved).length : 0
+  const warnings = result?.warnings?.length
+    ? `<div class="banner">${result.warnings.map((warning) => escapeHtml(warning.line ? `Line ${warning.line}: ${warning.message}` : warning.message)).join('<br>')}</div>`
+    : ''
+  const cards = result
+    ? (result.cards.length
+      ? `<div class="deck-grid">${result.cards.map(deckCardHtml).join('')}</div>`
+      : '<p class="muted">That list did not contain any cards.</p>')
+    : ''
+  return `
+    <div class="top">
+      <div>
+        <h2>Deck test</h2>
+        <p class="muted">Paste a PTCGL or Limitless list. pokemon-tcg-deck-parser resolves it against this server, then each card is shown with the image it returned.</p>
+      </div>
+    </div>
+    <form class="panel" id="deck-form">
+      <div class="fields">
+        ${langField(deck.lang)}
+        <div class="row-actions deck-actions">
+          <button type="button" id="deck-sample">Load sample</button>
+          <button class="primary" type="submit" ${deck.busy ? 'disabled' : ''}>${deck.busy ? 'Parsing…' : 'Parse deck'}</button>
+        </div>
+      </div>
+      <label class="wide">Deck list
+        <textarea id="deck-text" class="deck-input" spellcheck="false"></textarea>
+      </label>
+      <p class="error">${escapeHtml(deck.error || '')}</p>
+    </form>
+    ${result ? `
+      <p class="muted deck-summary">${escapeHtml(result.format)} · ${result.totalCards} cards · ${unique} unique · ${unresolved} unresolved</p>
+      ${warnings}
+      ${cards}
+    ` : ''}`
+}
+
+function deckCardHtml(card) {
+  const src = cardImageSrc(card.image)
+  const meta = card.resolved
+    ? [card.tcgdexId, card.localId && `#${card.localId}`, card.setCode, card.number].filter(Boolean).join(' · ')
+    : (card.unresolvedReason || 'Not found')
+  const art = src
+    ? `<img src="${escapeAttr(src)}" alt="${escapeAttr(card.name)}" data-fallback="${escapeAttr(card.image)}">`
+    : '<span class="muted">No image</span>'
+  return `
+    <article class="deck-card ${card.resolved ? '' : 'missing'}">
+      <div class="deck-art">
+        ${art}
+        <b class="qty">${escapeHtml(card.quantity)}</b>
+      </div>
+      <h3>${escapeHtml(card.name)}</h3>
+      <p>${escapeHtml(meta)}</p>
+    </article>`
+}
+
+function cardImageSrc(image) {
+  if (!image) return ''
+  const base = String(image).replace(/\/+$/, '')
+  if (/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(base)) return base
+  return `${base}/low.webp`
+}
+
+function bindDeck(main) {
+  const form = main.querySelector('#deck-form')
+  if (!form) return
+  const text = main.querySelector('#deck-text')
+  text.value = state.deck.text
+  const remember = () => {
+    state.deck.text = text.value
+    state.deck.lang = main.querySelector('#deck-form [data-field="lang"]').value
+  }
+  text.addEventListener('input', remember)
+  main.querySelector('#deck-form [data-field="lang"]').addEventListener('change', remember)
+  main.querySelector('#deck-sample').addEventListener('click', () => {
+    text.value = DECK_SAMPLE
+    remember()
+  })
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault()
+    remember()
+    state.deck.busy = true
+    state.deck.error = ''
+    render()
+    try {
+      state.deck.result = await api('/manage/api/parse-deck', {
+        method: 'POST',
+        body: { lang: state.deck.lang, text: state.deck.text },
+      })
+      state.deck.error = ''
+    } catch (error) {
+      state.deck.error = error.message
+    } finally {
+      state.deck.busy = false
+      render()
+    }
+  })
+  main.querySelectorAll('.deck-art img').forEach((img) => {
+    img.addEventListener('error', () => {
+      const fallback = img.dataset.fallback
+      if (fallback && img.src !== new URL(fallback, location.href).href) {
+        img.src = fallback
+        return
+      }
+      img.replaceWith(Object.assign(document.createElement('span'), { className: 'muted', textContent: 'Image failed' }))
+    })
   })
 }
 
