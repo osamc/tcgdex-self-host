@@ -106,6 +106,19 @@ th { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-
 .error { color: var(--red); min-height: 1.2rem; }
 .banner { border: 1px solid rgba(226, 177, 90, 0.4); background: rgba(226, 177, 90, 0.08); padding: 0.7rem 0.8rem; border-radius: 10px; margin-bottom: 1rem; }
 
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  z-index: 5;
+}
+.modal .panel { width: min(680px, 100%); max-height: calc(100vh - 2rem); overflow: auto; }
+.modal .fields { margin-bottom: 0.8rem; }
+.modal h3 { margin: 0 0 0.4rem; text-transform: none; letter-spacing: 0; font-size: 1.15rem; color: var(--text); }
+
 @media (max-width: 960px) {
   .shell, .editor, .stats { grid-template-columns: 1fr; }
   .nav { border-right: 0; border-bottom: 1px solid var(--line); }

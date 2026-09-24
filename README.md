@@ -88,6 +88,36 @@ A saved card uses the same JSON shape as `GET /v2/{lang}/cards/{id}`. Saving an 
 
 To override an official card, use **Import upstream** in the UI. Card ids look like `swsh3-136` or `exu-M`. For set-scoped cards you can also enter `set/localId` (for example `exu/M` for Unown M from Unseen Forces Unown Collection).
 
+**Import JSON** accepts one record or a bundle and writes it into the data directory:
+
+```json
+{
+  "cards": [],
+  "sets": [],
+  "series": []
+}
+```
+
+A bare card, set, or series object works too. The language selected in the dialog is used when the JSON does not include one. Saving an id that already exists replaces that file.
+
+## Preseeded Unown UFU card
+
+On startup the manager copies these files into `data/` when they are not already there:
+
+- `examples/series/en/unown.json`
+- `examples/sets/en/ufu.json`
+- `examples/cards/en/ufu-m.json`
+- `examples/images/ufu-m.png`
+
+[pokemon-tcg-deck-parser](https://www.npmjs.com/package/pokemon-tcg-deck-parser) does not treat a lone letter as a collector number, so this decklist is looked up by card name:
+
+```text
+Pokémon: 24
+2 Unown UFU M
+```
+
+The preseeded card is named `Unown UFU M`, in set `ufu` (abbreviation and PTCGL code `UFU`, local id `M`). Its `image` field is `/assets/ufu-m`, and that path serves the custom PNG at `/assets/ufu-m/high.webp` and `/assets/ufu-m/low.webp`. Point the parser at this server with `endpoint: "http://127.0.0.1:8080/v2"`. Files you have already edited are not overwritten.
+
 Uploaded images are served from `/assets/<name>`. The card `image` field is stored as that base path, without a file extension, matching official TCGdex. Clients then request:
 
 ```text
@@ -125,7 +155,7 @@ List filters use the TCGdex operators (`name=pikachu`, `name=eq:Furret`, `hp=gte
 
 ## Development
 
-The manager is a Node.js program with no dependencies. Tests use a fake upstream and do not need Docker:
+The manager runtime has no dependencies. Tests use a fake upstream and do not need Docker. They also install `pokemon-tcg-deck-parser` to check the preseeded Unown card:
 
 ```bash
 cd manager

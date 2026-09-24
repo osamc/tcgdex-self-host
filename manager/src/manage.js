@@ -160,6 +160,10 @@ async function annotate(kind, lang, id, body, upstream) {
 async function handleImport(req, res, ctx) {
   const body = await readJson(req, res)
   if (body == null) return
+  if (isJsonImport(body)) {
+    await handleJsonImport(body, res, ctx)
+    return
+  }
   const kind = body.kind === 'series' ? 'series' : body.kind
   const lang = body.lang
   const rawId = String(body.id || '').trim()
@@ -199,6 +203,113 @@ async function handleImport(req, res, ctx) {
   } catch {
     sendJson(res, 502, { error: 'upstream is unavailable' })
   }
+}
+
+function isJsonImport(body) {
+  if (Array.isArray(body)) return true
+  if (!body || typeof body !== 'object') return false
+  if (body.document !== undefined) return true
+  if (body.record && typeof body.record === 'object') return true
+  return Array.isArray(body.cards) || Array.isArray(body.sets) || Array.isArray(body.series)
+}
+
+async function handleJsonImport(body, res, ctx) {
+  const document = body.document !== undefined ? body.document : body
+  const fallback = { lang: body.lang, kind: body.kind }
+  let items
+  try {
+    items = collectJsonImports(document, fallback)
+  } catch (error) {
+    sendJson(res, 400, { error: error.message })
+    return
+  }
+  if (!items.length) {
+    sendJson(res, 400, { error: 'no cards, sets, or series found in JSON' })
+    return
+  }
+
+  const errors = []
+  const prepared = []
+  for (const item of items) {
+    const label = `${item.kind || 'record'} ${item.record?.id || '(missing id)'}`
+    if (!['cards', 'sets', 'series'].includes(item.kind)) {
+      errors.push(`${label}: kind must be cards, sets, or series`)
+      continue
+    }
+    if (!isLanguage(item.lang)) {
+      errors.push(`${label}: language is invalid`)
+      continue
+    }
+    const record = { ...item.record }
+    delete record._meta
+    delete record._lang
+    delete record.kind
+    delete record.lang
+    const problems = VALIDATORS[item.kind](record)
+    if (problems.length) errors.push(`${label}: ${problems.join('; ')}`)
+    else prepared.push({ kind: item.kind, lang: item.lang, record })
+  }
+  if (errors.length) {
+    sendJson(res, 400, { error: 'invalid definition', details: errors })
+    return
+  }
+
+  const saved = []
+  for (const item of prepared) {
+    const annotated = await annotate(item.kind, item.lang, item.record.id, item.record, ctx.upstream)
+    ctx.store.put(item.kind, item.lang, annotated.id, annotated)
+    saved.push({ kind: item.kind, lang: item.lang, id: annotated.id })
+  }
+  sendJson(res, 200, { saved })
+}
+
+/**
+ * Accept a single record, `{ kind, lang, record }`, or `{ cards, sets, series }`.
+ * Series and sets are ordered before cards.
+ */
+export function collectJsonImports(document, fallback = {}) {
+  if (Array.isArray(document)) {
+    return document.flatMap((item) => collectJsonImports(item, fallback))
+  }
+  if (!document || typeof document !== 'object') {
+    throw new Error('JSON import must be an object or an array')
+  }
+  const lang = document.lang || document._lang || fallback.lang
+  if (Array.isArray(document.cards) || Array.isArray(document.sets) || Array.isArray(document.series)) {
+    const items = []
+    for (const kind of ['series', 'sets', 'cards']) {
+      for (const record of document[kind] || []) {
+        if (!record || typeof record !== 'object' || Array.isArray(record)) {
+          throw new Error(`${kind} entries must be JSON objects`)
+        }
+        items.push({ kind, lang: record.lang || record._lang || lang, record })
+      }
+    }
+    return items
+  }
+  if (document.record && typeof document.record === 'object' && !Array.isArray(document.record)) {
+    const kind = normalizeKind(document.kind || fallback.kind)
+    return [{ kind, lang, record: document.record }]
+  }
+  const kind = normalizeKind(
+    ['cards', 'sets', 'series'].includes(document.kind) ? document.kind : (fallback.kind || inferKind(document)),
+  )
+  if (!kind) throw new Error('could not tell whether the JSON is a card, set, or series')
+  return [{ kind, lang, record: document }]
+}
+
+function normalizeKind(kind) {
+  if (kind === 'card') return 'cards'
+  if (kind === 'set') return 'sets'
+  if (kind === 'serie' || kind === 'series') return 'series'
+  return ['cards', 'sets', 'series'].includes(kind) ? kind : null
+}
+
+function inferKind(record) {
+  if (record.category || record.localId || record.variants || record.attacks) return 'cards'
+  if (record.serie || record.cardCount || record.abbreviation || record.tcgOnline || record.releaseDate) return 'sets'
+  if (record.id && record.name) return 'series'
+  return null
 }
 
 async function handleImageUpload(name, req, res, ctx) {
