@@ -122,6 +122,20 @@ test('the preseeded Unown card is what the deck parser returns for "2 Unown UF M
 
     const again = seedCatalog(dataDir)
     assert.deepEqual(again, [])
+
+    const parsed = await fetch(`${base}/manage/api/parse-deck`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ lang: 'en', text: DECK }),
+    })
+    assert.equal(parsed.status, 200)
+    const preview = await parsed.json()
+    assert.equal(preview.totalCards, 2)
+    assert.equal(preview.cards.length, 1)
+    assert.equal(preview.cards[0].tcgdexId, 'uf-m')
+    assert.equal(preview.cards[0].image, '/assets/uf-m')
+    assert.equal(preview.cards[0].quantity, 2)
+    assert.equal(preview.cards[0].resolved, true)
   } finally {
     app.metrics.flush()
     await new Promise((resolve) => app.server.close(resolve))

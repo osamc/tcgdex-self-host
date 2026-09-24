@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { timingSafeEqual } from 'node:crypto'
+import { localApiEndpoint, parseDeckList } from './deck.js'
 import { IMAGE_TYPES, publicAssetPath, publicAssetUrl, resolveImageFile, safeImageRelPath, writeImageFile } from './images.js'
 import { isLanguage } from './languages.js'
 import { isSafeId, isSafeLocalId, validateCard, validateSerie, validateSet } from './store.js'
@@ -72,6 +73,10 @@ export async function handleManagement(req, res, ctx) {
   }
   if (req.method === 'POST' && action === 'import') {
     await handleImport(req, res, ctx)
+    return true
+  }
+  if (req.method === 'POST' && action === 'parse-deck') {
+    await handleParseDeck(req, res)
     return true
   }
   if (action === 'images' && parts[3] && req.method === 'PUT') {
@@ -155,6 +160,23 @@ async function annotate(kind, lang, id, body, upstream) {
   }
   if (!saved.updated) saved.updated = saved._meta.savedAt
   return saved
+}
+
+async function handleParseDeck(req, res) {
+  const body = await readJson(req, res)
+  if (body == null) return
+  const lang = body.lang || 'en'
+  if (!isLanguage(lang)) {
+    sendJson(res, 400, { error: 'language is invalid' })
+    return
+  }
+  try {
+    const deck = await parseDeckList(body.text, { lang, endpoint: localApiEndpoint(req) })
+    sendJson(res, 200, deck)
+  } catch (error) {
+    const status = error.status || 502
+    sendJson(res, status, { error: error.message || 'could not parse that deck' })
+  }
 }
 
 async function handleImport(req, res, ctx) {

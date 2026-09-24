@@ -4,7 +4,8 @@ RUN apk add --no-cache su-exec
 
 WORKDIR /app
 
-COPY manager/package.json ./
+COPY manager/package.json manager/package-lock.json ./
+RUN npm ci --omit=dev
 COPY manager/src ./src
 COPY manager/public ./public
 COPY examples ./seed
