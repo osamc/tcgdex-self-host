@@ -9,7 +9,7 @@ import { createApp } from '../src/server.js'
 import { seedCatalog } from '../src/seed.js'
 
 const TOKEN = 'test-token-value-123'
-const DECK = 'Pokémon: 24\n2 Unown UFU M\n'
+const DECK = 'Pokémon: 24\n2 Unown UF M\n'
 
 async function listen(handler) {
   const server = http.createServer(handler)
@@ -80,12 +80,12 @@ test('JSON import stores a card, set, and series', async () => {
   }
 })
 
-test('the preseeded Unown card is what the deck parser returns for "2 Unown UFU M"', async () => {
+test('the preseeded Unown card is what the deck parser returns for "2 Unown UF M"', async () => {
   const upstream = await emptyUpstream()
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tcgdex-ufu-'))
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tcgdex-uf-'))
   const copied = seedCatalog(dataDir)
-  assert.ok(copied.includes('cards/en/ufu-m.json'))
-  assert.ok(copied.includes('images/ufu-m.png'))
+  assert.ok(copied.includes('cards/en/uf-m.json'))
+  assert.ok(copied.includes('images/uf-m.png'))
 
   const app = createApp({
     token: TOKEN,
@@ -110,9 +110,9 @@ test('the preseeded Unown card is what the deck parser returns for "2 Unown UFU 
     assert.equal(deck.cards.length, 1)
     const entry = deck.cards[0]
     assert.equal(entry.quantity, 2)
-    assert.equal(entry.name, 'Unown UFU M')
-    assert.equal(entry.tcgdexId, 'ufu-m')
-    assert.equal(entry.card.image, '/assets/ufu-m')
+    assert.equal(entry.name, 'Unown UF M')
+    assert.equal(entry.tcgdexId, 'uf-m')
+    assert.equal(entry.card.image, '/assets/uf-m')
     assert.equal(entry.card.localId, 'M')
 
     const image = await fetch(`${base}${entry.card.image}/high.webp`)

@@ -505,7 +505,7 @@ function jsonImportHtml() {
           </label>
         </div>
         <label class="wide">JSON
-          <textarea id="json-body" spellcheck="false" placeholder='{"id":"ufu-m","localId":"M","name":"Unown UFU M","category":"Pokemon","set":{"id":"ufu","name":"Unown UFU"},"variants":{"normal":true},"image":"/assets/ufu-m"}'></textarea>
+          <textarea id="json-body" spellcheck="false" placeholder='{"id":"uf-m","localId":"M","name":"Unown UF M","category":"Pokemon","set":{"id":"uf","name":"Unown UF"},"variants":{"normal":true},"image":"/assets/uf-m"}'></textarea>
         </label>
         <p class="error" id="json-error">${escapeHtml(draft.error || '')}</p>
         <div class="row-actions">

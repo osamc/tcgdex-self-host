@@ -3,16 +3,16 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * Records the deck parser can resolve for the line "2 Unown UFU M".
+ * Records the deck parser can resolve for the line "2 Unown UF M".
  * The library keeps that whole line as the card name, then asks the API
- * for name=eq:Unown UFU M. The set code UFU is stored for clients that
+ * for name=eq:Unown UF M. The set code UF is stored for clients that
  * look the set up directly.
  */
 const SEED_FILES = [
   'series/en/unown.json',
-  'sets/en/ufu.json',
-  'cards/en/ufu-m.json',
-  'images/ufu-m.png',
+  'sets/en/uf.json',
+  'cards/en/uf-m.json',
+  'images/uf-m.png',
 ]
 
 export function seedDirectories() {

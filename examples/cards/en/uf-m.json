@@ -1,13 +1,13 @@
 {
-  "id": "ufu-m",
+  "id": "uf-m",
   "localId": "M",
-  "name": "Unown UFU M",
+  "name": "Unown UF M",
   "category": "Pokemon",
   "illustrator": "Custom",
   "rarity": "Rare",
   "set": {
-    "id": "ufu",
-    "name": "Unown UFU"
+    "id": "uf",
+    "name": "Unown UF"
   },
   "variants": {
     "firstEdition": false,
@@ -20,7 +20,7 @@
   "types": ["Psychic"],
   "stage": "Basic",
   "suffix": "M",
-  "description": "Custom Unown print. pokemon-tcg-deck-parser resolves the deck line \"2 Unown UFU M\" by searching for this exact card name.",
+  "description": "Custom Unown print. pokemon-tcg-deck-parser resolves the deck line \"2 Unown UF M\" by searching for this exact card name.",
   "attacks": [
     {
       "cost": ["Psychic"],
@@ -34,5 +34,5 @@
     "standard": false,
     "expanded": false
   },
-  "image": "/assets/ufu-m"
+  "image": "/assets/uf-m"
 }

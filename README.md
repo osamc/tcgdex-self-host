@@ -100,23 +100,23 @@ To override an official card, use **Import upstream** in the UI. Card ids look l
 
 A bare card, set, or series object works too. The language selected in the dialog is used when the JSON does not include one. Saving an id that already exists replaces that file.
 
-## Preseeded Unown UFU card
+## Preseeded Unown UF card
 
 On startup the manager copies these files into `data/` when they are not already there:
 
 - `examples/series/en/unown.json`
-- `examples/sets/en/ufu.json`
-- `examples/cards/en/ufu-m.json`
-- `examples/images/ufu-m.png`
+- `examples/sets/en/uf.json`
+- `examples/cards/en/uf-m.json`
+- `examples/images/uf-m.png`
 
 [pokemon-tcg-deck-parser](https://www.npmjs.com/package/pokemon-tcg-deck-parser) does not treat a lone letter as a collector number, so this decklist is looked up by card name:
 
 ```text
 Pokémon: 24
-2 Unown UFU M
+2 Unown UF M
 ```
 
-The preseeded card is named `Unown UFU M`, in set `ufu` (abbreviation and PTCGL code `UFU`, local id `M`). Its `image` field is `/assets/ufu-m`, and that path serves the custom PNG at `/assets/ufu-m/high.webp` and `/assets/ufu-m/low.webp`. Point the parser at this server with `endpoint: "http://127.0.0.1:8080/v2"`. Files you have already edited are not overwritten.
+The preseeded card is named `Unown UF M`, in set `uf` (abbreviation and PTCGL code `UF`, local id `M`). Its `image` field is `/assets/uf-m`, and that path serves the custom PNG at `/assets/uf-m/high.webp` and `/assets/uf-m/low.webp`. Point the parser at this server with `endpoint: "http://127.0.0.1:8080/v2"`. Files you have already edited are not overwritten.
 
 Uploaded images are served from `/assets/<name>`. The card `image` field is stored as that base path, without a file extension, matching official TCGdex. Clients then request:
 
