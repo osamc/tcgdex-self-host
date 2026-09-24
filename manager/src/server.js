@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { resolveRequest } from './catalog.js'
 import { handleManagement, readBody, sendJson } from './manage.js'
 import { createMetrics, templatePath } from './metrics.js'
+import { seedCatalog } from './seed.js'
 import { createStore } from './store.js'
 import { createUpstream } from './upstream.js'
 
@@ -164,9 +165,11 @@ export function listen(options) {
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])
 if (isMain) {
   const port = Number.parseInt(process.env.PORT || '8080', 10)
+  const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data')
+  seedCatalog(dataDir)
   listen({
     token: process.env.MANAGEMENT_TOKEN || '',
-    dataDir: process.env.DATA_DIR || path.join(process.cwd(), 'data'),
+    dataDir,
     upstreamUrl: process.env.UPSTREAM_URL || 'http://127.0.0.1:3000',
     cacheTtlSeconds: Number.parseInt(process.env.UPSTREAM_CACHE_TTL || '300', 10),
     port,

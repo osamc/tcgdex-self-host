@@ -1,0 +1,38 @@
+{
+  "id": "uf-m",
+  "localId": "M",
+  "name": "Unown UF M",
+  "category": "Pokemon",
+  "illustrator": "Custom",
+  "rarity": "Rare",
+  "set": {
+    "id": "uf",
+    "name": "Unown UF"
+  },
+  "variants": {
+    "firstEdition": false,
+    "holo": true,
+    "normal": true,
+    "reverse": false,
+    "wPromo": false
+  },
+  "hp": 70,
+  "types": ["Psychic"],
+  "stage": "Basic",
+  "suffix": "M",
+  "description": "Custom Unown print. pokemon-tcg-deck-parser resolves the deck line \"2 Unown UF M\" by searching for this exact card name.",
+  "attacks": [
+    {
+      "cost": ["Psychic"],
+      "name": "Hidden Power",
+      "damage": 30
+    }
+  ],
+  "retreat": 1,
+  "regulationMark": "M",
+  "legal": {
+    "standard": false,
+    "expanded": false
+  },
+  "image": "/assets/uf-m"
+}

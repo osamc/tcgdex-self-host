@@ -4,10 +4,11 @@ RUN apk add --no-cache su-exec
 
 WORKDIR /app
 
-COPY package.json ./
-COPY src ./src
-COPY public ./public
-COPY docker-entrypoint.sh /docker-entrypoint.sh
+COPY manager/package.json ./
+COPY manager/src ./src
+COPY manager/public ./public
+COPY examples ./seed
+COPY manager/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
 ENV NODE_ENV=production

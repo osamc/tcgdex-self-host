@@ -114,6 +114,8 @@ function render() {
   else main.innerHTML = catalogHtml(state.tab)
   main.querySelector('[data-new]')?.addEventListener('click', () => openEditor(state.tab, blank(state.tab)))
   main.querySelector('[data-import]')?.addEventListener('click', () => openImport(state.tab))
+  main.querySelector('[data-import-json]')?.addEventListener('click', () => openJsonImport(state.tab))
+  if (state.jsonImport) bindJsonImport(main)
   main.querySelectorAll('[data-edit]').forEach((button) => {
     button.addEventListener('click', () => loadRecord(state.tab, button.dataset.lang, button.dataset.edit))
   })
@@ -193,7 +195,7 @@ function catalogHtml(kind) {
           <button type="button" class="danger" data-delete="${escapeAttr(row.id)}" data-lang="${escapeAttr(row.lang)}">Delete</button>
         </td>
       </tr>`).join('')
-    : `<tr><td colspan="6">No ${kind} yet. Create one, import an upstream record to override it, or copy files into the data directory.</td></tr>`
+    : `<tr><td colspan="6">No ${kind} yet. Create one, import JSON, import an upstream record, or copy files into the data directory.</td></tr>`
   const banner = problems.length
     ? `<div class="banner">${problems.map((problem) => `${escapeHtml(problem.file)}: ${escapeHtml(problem.message)}`).join('<br>')}</div>`
     : ''
@@ -204,6 +206,7 @@ function catalogHtml(kind) {
         <p class="muted">Same id as an upstream record replaces that record. A new id is added beside the official catalog.</p>
       </div>
       <div class="row-actions">
+        <button type="button" data-import-json>Import JSON</button>
         <button type="button" data-import>Import upstream</button>
         <button class="primary" type="button" data-new>New</button>
       </div>
@@ -215,7 +218,8 @@ function catalogHtml(kind) {
         <thead><tr><th>Lang</th><th>Id</th><th>Name</th><th>${kind === 'cards' ? 'Set' : kind === 'sets' ? 'Series' : ''}</th><th>Kind</th><th></th></tr></thead>
         <tbody>${body}</tbody>
       </table>
-    </section>`
+    </section>
+    ${state.jsonImport ? jsonImportHtml() : ''}`
 }
 
 function renderEditor() {
@@ -475,6 +479,86 @@ function openEditor(kind, record, lang = 'en', existing = false) {
   state.editing = { kind, record, lang: lang || 'en', existing }
   state.error = ''
   renderEditor()
+}
+
+function openJsonImport(kind) {
+  const preset = kind === 'series' ? 'series' : kind
+  state.jsonImport = state.jsonImport || { lang: 'en', kind: preset, text: '', error: '' }
+  state.jsonImport.kind = preset
+  state.error = ''
+  render()
+}
+
+function jsonImportHtml() {
+  const draft = state.jsonImport
+  return `
+    <div class="modal">
+      <form class="panel" id="json-import">
+        <h3>Import JSON</h3>
+        <p class="muted">Paste one card, set, or series, or a bundle with <code>cards</code>, <code>sets</code>, and <code>series</code> arrays. An existing id is replaced.</p>
+        <div class="fields">
+          ${langField(draft.lang || 'en')}
+          <label>Kind when it is not obvious
+            <select id="json-kind">
+              ${[['auto', 'Auto'], ['cards', 'Card'], ['sets', 'Set'], ['series', 'Series']].map(([value, label]) => `<option value="${value}" ${draft.kind === value ? 'selected' : ''}>${label}</option>`).join('')}
+            </select>
+          </label>
+        </div>
+        <label class="wide">JSON
+          <textarea id="json-body" spellcheck="false" placeholder='{"id":"uf-m","localId":"M","name":"Unown UF M","category":"Pokemon","set":{"id":"uf","name":"Unown UF"},"variants":{"normal":true},"image":"/assets/uf-m"}'></textarea>
+        </label>
+        <p class="error" id="json-error">${escapeHtml(draft.error || '')}</p>
+        <div class="row-actions">
+          <button type="button" id="json-cancel">Cancel</button>
+          <button class="primary" type="submit">Import</button>
+        </div>
+      </form>
+    </div>`
+}
+
+function bindJsonImport(main) {
+  const box = main.querySelector('#json-body')
+  if (!box) return
+  box.value = state.jsonImport.text || ''
+  const lang = main.querySelector('#json-import [data-field="lang"]')
+  const kind = main.querySelector('#json-kind')
+  const remember = () => {
+    state.jsonImport.lang = lang.value
+    state.jsonImport.kind = kind.value
+    state.jsonImport.text = box.value
+  }
+  lang.addEventListener('change', remember)
+  kind.addEventListener('change', remember)
+  box.addEventListener('input', remember)
+  main.querySelector('#json-cancel').addEventListener('click', () => {
+    state.jsonImport = null
+    render()
+  })
+  main.querySelector('#json-import').addEventListener('submit', async (event) => {
+    event.preventDefault()
+    remember()
+    let document
+    try {
+      document = JSON.parse(box.value)
+    } catch (error) {
+      state.jsonImport.error = error.message
+      render()
+      return
+    }
+    const selectedKind = kind.value === 'auto' ? undefined : kind.value
+    try {
+      await api('/manage/api/import', {
+        method: 'POST',
+        body: { lang: lang.value, kind: selectedKind, document },
+      })
+      state.jsonImport = null
+      state.error = ''
+      await refresh()
+    } catch (error) {
+      state.jsonImport.error = error.message
+      render()
+    }
+  })
 }
 
 function openImport(kind) {
