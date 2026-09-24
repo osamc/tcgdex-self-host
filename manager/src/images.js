@@ -11,7 +11,7 @@ export const IMAGE_TYPES = {
 }
 export const QUALITIES = ['high', 'low']
 
-const STEM_RE = /^[a-z0-9][a-z0-9._-]{0,80}$/
+const STEM_RE = /^[a-z0-9][a-z0-9._%!-]{0,80}$/
 const EXT_SET = new Set(IMAGE_EXTENSIONS)
 
 export function extensionOf(name) {

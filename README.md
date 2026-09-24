@@ -86,7 +86,7 @@ Languages are the ones TCGdex publishes: `en`, `fr`, `es`, `es-mx`, `it`, `pt`, 
 
 A saved card uses the same JSON shape as `GET /v2/{lang}/cards/{id}`. Saving an id that already exists upstream replaces that card everywhere the REST catalog lists it. A new id is added next to the official data. Sets and series work the same way. Cards inside a set are collected from the card files, so a set file does not embed its card list.
 
-To override an official card, use **Import upstream** in the UI (for example `swsh3-136`), edit the JSON, and save.
+To override an official card, use **Import upstream** in the UI. Card ids look like `swsh3-136` or `exu-M`. For set-scoped cards you can also enter `set/localId` (for example `exu/M` for Unown M from Unseen Forces Unown Collection).
 
 Uploaded images are served from `/assets/<name>`. The card `image` field is stored as that base path, without a file extension, matching official TCGdex. Clients then request:
 

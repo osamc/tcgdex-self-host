@@ -1,9 +1,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { timingSafeEqual } from 'node:crypto'
-import { IMAGE_TYPES, publicAssetPath, resolveImageFile, safeImageRelPath, writeImageFile } from './images.js'
+import { IMAGE_TYPES, publicAssetPath, publicAssetUrl, resolveImageFile, safeImageRelPath, writeImageFile } from './images.js'
 import { isLanguage } from './languages.js'
-import { isSafeId, validateCard, validateSerie, validateSet } from './store.js'
+import { isSafeId, isSafeLocalId, validateCard, validateSerie, validateSet } from './store.js'
 
 const VALIDATORS = {
   cards: validateCard,
@@ -127,6 +127,18 @@ async function annotate(kind, lang, id, body, upstream) {
   const saved = { ...body }
   delete saved._meta
   delete saved._lang
+  if (kind === 'cards' && typeof saved.image === 'string') {
+    const image = publicAssetUrl(saved.image.trim())
+    if (image) saved.image = image
+    else delete saved.image
+  }
+  for (const key of ['logo', 'symbol']) {
+    if (typeof saved[key] === 'string') {
+      const media = publicAssetUrl(saved[key].trim())
+      if (media) saved[key] = media
+      else delete saved[key]
+    }
+  }
   let upstreamHit = false
   let upstreamSetId = null
   try {
@@ -149,13 +161,33 @@ async function handleImport(req, res, ctx) {
   const body = await readJson(req, res)
   if (body == null) return
   const kind = body.kind === 'series' ? 'series' : body.kind
-  if (!['cards', 'sets', 'series'].includes(kind) || !isLanguage(body.lang) || !isSafeId(String(body.id || ''))) {
+  const lang = body.lang
+  const rawId = String(body.id || '').trim()
+  if (!['cards', 'sets', 'series'].includes(kind) || !isLanguage(lang) || !rawId) {
     sendJson(res, 400, { error: 'kind, lang, and id are required' })
     return
   }
   const endpoint = kind === 'series' ? 'series' : kind
+  let upstreamPath
+  if (kind === 'cards' && rawId.includes('/')) {
+    const parts = rawId.split('/')
+    if (parts.length !== 2 || !isSafeId(parts[0]) || !isSafeLocalId(parts[1])) {
+      sendJson(res, 400, {
+        error: 'use a card id like exu-M, or set/localId like exu/M',
+      })
+      return
+    }
+    upstreamPath = `/v2/${lang}/sets/${encodeURIComponent(parts[0])}/${encodeURIComponent(parts[1])}`
+  } else if (!isSafeId(rawId)) {
+    sendJson(res, 400, {
+      error: 'id may contain letters, numbers, dots, underscores, hyphens, %, and !',
+    })
+    return
+  } else {
+    upstreamPath = `/v2/${lang}/${endpoint}/${encodeURIComponent(rawId)}`
+  }
   try {
-    const existing = await ctx.upstream.request(`/v2/${body.lang}/${endpoint}/${encodeURIComponent(body.id)}`)
+    const existing = await ctx.upstream.request(upstreamPath)
     if (existing.status !== 200 || !existing.json || Array.isArray(existing.json)) {
       sendJson(res, 404, { error: 'upstream does not have that record' })
       return
@@ -163,7 +195,7 @@ async function handleImport(req, res, ctx) {
     const record = { ...existing.json }
     delete record.cards
     delete record.sets
-    sendJson(res, 200, { kind, lang: body.lang, record, upstream: true })
+    sendJson(res, 200, { kind, lang, record, upstream: true })
   } catch {
     sendJson(res, 502, { error: 'upstream is unavailable' })
   }

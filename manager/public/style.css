@@ -63,6 +63,16 @@ main { padding: 1.25rem; }
 .top { display: flex; justify-content: space-between; gap: 1rem; align-items: center; margin-bottom: 1rem; }
 .top h2 { margin: 0; font-size: 1.35rem; }
 .muted { color: var(--muted); }
+.upload-status {
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid rgba(61, 190, 139, 0.45);
+  background: rgba(61, 190, 139, 0.12);
+  color: var(--green);
+  font-size: 0.88rem;
+}
+.upload-status[hidden] { display: none; }
 .row-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
 
 .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin-bottom: 1rem; }
