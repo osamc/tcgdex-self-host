@@ -17,6 +17,11 @@ const state = {
     error: '',
     busy: false,
   },
+  needed: {
+    items: [],
+    error: '',
+    draft: { lang: 'en', name: '', set: '', localId: '', notes: '' },
+  },
 }
 
 boot()
@@ -34,12 +39,14 @@ function boot() {
 }
 
 async function refresh() {
-  const [metrics, catalog] = await Promise.all([
+  const [metrics, catalog, needed] = await Promise.all([
     api('/manage/api/metrics'),
     api('/manage/api/catalog'),
+    api('/manage/api/needed'),
   ])
   state.metrics = metrics
   state.catalog = catalog
+  state.needed.items = needed.items || []
   if (!state.editing) render()
 }
 
@@ -100,6 +107,7 @@ function render() {
         ${navButton('cards', 'Cards')}
         ${navButton('sets', 'Sets')}
         ${navButton('series', 'Series')}
+        ${navButton('needed', neededLabel())}
         ${navButton('deck', 'Deck test')}
         <button type="button" id="lock">Lock</button>
       </aside>
@@ -120,14 +128,20 @@ function render() {
   const main = app.querySelector('#main')
   if (state.tab === 'dashboard') main.innerHTML = dashboardHtml()
   else if (state.tab === 'deck') main.innerHTML = deckHtml()
+  else if (state.tab === 'needed') main.innerHTML = neededHtml()
   else main.innerHTML = catalogHtml(state.tab)
   bindDeck(main)
+  bindNeeded(main)
   main.querySelector('[data-new]')?.addEventListener('click', () => openEditor(state.tab, blank(state.tab)))
+  main.querySelector('[data-export]')?.addEventListener('click', () => exportCatalog())
   main.querySelector('[data-import]')?.addEventListener('click', () => openImport(state.tab))
   main.querySelector('[data-import-json]')?.addEventListener('click', () => openJsonImport(state.tab))
   if (state.jsonImport) bindJsonImport(main)
   main.querySelectorAll('[data-edit]').forEach((button) => {
     button.addEventListener('click', () => loadRecord(state.tab, button.dataset.lang, button.dataset.edit))
+  })
+  main.querySelectorAll('[data-duplicate]').forEach((button) => {
+    button.addEventListener('click', () => duplicateRecord(button.dataset.lang, button.dataset.duplicate))
   })
   main.querySelectorAll('[data-delete]').forEach((button) => {
     button.addEventListener('click', () => removeRecord(state.tab, button.dataset.lang, button.dataset.delete))
@@ -252,6 +266,11 @@ function navButton(id, label) {
   return `<button type="button" data-tab="${id}" class="${state.tab === id ? 'active' : ''}">${label}</button>`
 }
 
+function neededLabel() {
+  const open = (state.needed.items || []).filter((item) => !item.done).length
+  return open ? `Needed (${open})` : 'Needed'
+}
+
 function dashboardHtml() {
   const metrics = state.metrics
   if (!metrics) return '<p>Loading traffic…</p>'
@@ -288,7 +307,7 @@ function dashboardHtml() {
       ${windowCell('Last minute', metrics.windows['1m'])}
       ${windowCell('Last 15 minutes', metrics.windows['15m'])}
       ${windowCell('Last 24 hours', metrics.windows['24h'])}
-      <article class="stat"><span>Catalog</span><b>${state.catalog.cards.length}</b><span class="detail">${state.catalog.sets.length} sets · ${state.catalog.series.length} series</span></article>
+      <article class="stat"><span>Catalog</span><b>${state.catalog.cards.length}</b><span class="detail">${state.catalog.sets.length} sets · ${state.catalog.series.length} series · ${(state.needed.items || []).filter((item) => !item.done).length} to implement</span></article>
     </section>
     <section class="panel">
       <h3>Requests per minute</h3>
@@ -304,6 +323,123 @@ function dashboardHtml() {
     </section>`
 }
 
+function neededHtml() {
+  const items = state.needed.items || []
+  const open = items.filter((item) => !item.done).length
+  const draft = state.needed.draft
+  const body = items.length
+    ? items.map((item) => `<tr class="${item.done ? 'done' : ''}">
+        <td>${escapeHtml(item.lang)}</td>
+        <td>${escapeHtml(item.name)}</td>
+        <td>${escapeHtml(item.set || '')}</td>
+        <td>${escapeHtml(item.localId || '')}</td>
+        <td>${escapeHtml(item.notes || '')}</td>
+        <td><span class="pill ${item.done ? 'custom' : 'override'}">${item.done ? 'done' : 'open'}</span></td>
+        <td class="actions">
+          <button type="button" data-needed-toggle="${escapeAttr(item.id)}">${item.done ? 'Reopen' : 'Done'}</button>
+          <button type="button" class="danger" data-needed-delete="${escapeAttr(item.id)}">Delete</button>
+        </td>
+      </tr>`).join('')
+    : '<tr><td colspan="7">No cards on the list yet. Add one that still needs to be implemented.</td></tr>'
+  return `
+    <div class="top">
+      <div>
+        <h2>Cards to implement</h2>
+        <p class="muted">${open} open. This list is saved on the server and stays after a restart.</p>
+      </div>
+    </div>
+    ${state.needed.error ? `<p class="error">${escapeHtml(state.needed.error)}</p>` : ''}
+    <form class="panel" id="needed-form">
+      <div class="fields">
+        ${langField(draft.lang || 'en')}
+        ${textField('name', 'Card name', draft.name || '')}
+        ${textField('set', 'Set', draft.set || '')}
+        ${textField('localId', 'Local id', draft.localId || '')}
+        <label class="wide">Notes
+          <input data-field="notes" value="${escapeAttr(draft.notes || '')}">
+        </label>
+      </div>
+      <div class="row-actions">
+        <button class="primary" type="submit">Add card</button>
+      </div>
+    </form>
+    <section class="panel">
+      <table>
+        <thead><tr><th>Lang</th><th>Name</th><th>Set</th><th>Local id</th><th>Notes</th><th>Status</th><th></th></tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </section>`
+}
+
+function bindNeeded(main) {
+  const form = main.querySelector('#needed-form')
+  if (!form) return
+  const readDraft = () => {
+    const value = (name) => form.querySelector(`[data-field="${name}"]`)?.value ?? ''
+    state.needed.draft = {
+      lang: value('lang') || 'en',
+      name: value('name'),
+      set: value('set'),
+      localId: value('localId'),
+      notes: value('notes'),
+    }
+  }
+  form.querySelectorAll('[data-field]').forEach((input) => input.addEventListener('input', readDraft))
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault()
+    readDraft()
+    const draft = state.needed.draft
+    if (!draft.name.trim()) {
+      state.needed.error = 'name is required'
+      render()
+      return
+    }
+    try {
+      await api('/manage/api/needed', { method: 'POST', body: draft })
+      state.needed.draft = { lang: draft.lang, name: '', set: '', localId: '', notes: '' }
+      state.needed.error = ''
+      state.needed.items = (await api('/manage/api/needed')).items || []
+      render()
+    } catch (error) {
+      state.needed.error = error.message
+      render()
+    }
+  })
+  main.querySelectorAll('[data-needed-toggle]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const item = state.needed.items.find((entry) => entry.id === button.dataset.neededToggle)
+      if (!item) return
+      try {
+        await api(`/manage/api/needed/${encodeURIComponent(item.id)}`, {
+          method: 'PUT',
+          body: { done: !item.done },
+        })
+        state.needed.error = ''
+        state.needed.items = (await api('/manage/api/needed')).items || []
+        render()
+      } catch (error) {
+        state.needed.error = error.message
+        render()
+      }
+    })
+  })
+  main.querySelectorAll('[data-needed-delete]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const item = state.needed.items.find((entry) => entry.id === button.dataset.neededDelete)
+      if (!item || !confirm(`Remove ${item.name} from the list?`)) return
+      try {
+        await api(`/manage/api/needed/${encodeURIComponent(item.id)}`, { method: 'DELETE' })
+        state.needed.error = ''
+        state.needed.items = (await api('/manage/api/needed')).items || []
+        render()
+      } catch (error) {
+        state.needed.error = error.message
+        render()
+      }
+    })
+  })
+}
+
 function catalogHtml(kind) {
   const rows = state.catalog[kind] || []
   const problems = (state.catalog.problems || []).filter((problem) => problem.file.startsWith(kind))
@@ -314,8 +450,9 @@ function catalogHtml(kind) {
         <td>${escapeHtml(row.name || '')}</td>
         <td>${escapeHtml(kind === 'cards' ? row.setName : kind === 'sets' ? row.serieName : '')}</td>
         <td><span class="pill ${row.upstream ? 'override' : 'custom'}">${row.upstream ? 'override' : 'custom'}</span></td>
-        <td>
+        <td class="actions">
           <button type="button" data-edit="${escapeAttr(row.id)}" data-lang="${escapeAttr(row.lang)}">Edit</button>
+          ${row.upstream && kind === 'cards' ? `<button type="button" data-duplicate="${escapeAttr(row.id)}" data-lang="${escapeAttr(row.lang)}">Duplicate</button>` : ''}
           <button type="button" class="danger" data-delete="${escapeAttr(row.id)}" data-lang="${escapeAttr(row.lang)}">Delete</button>
         </td>
       </tr>`).join('')
@@ -330,6 +467,7 @@ function catalogHtml(kind) {
         <p class="muted">Same id as an upstream record replaces that record. A new id is added beside the official catalog.</p>
       </div>
       <div class="row-actions">
+        <button type="button" data-export title="Download every saved card, set, and series as JSON">Export</button>
         <button type="button" data-import-json>Import JSON</button>
         <button type="button" data-import>Import upstream</button>
         <button class="primary" type="button" data-new>New</button>
@@ -353,7 +491,9 @@ function renderEditor() {
       <div class="top">
         <div>
           <h2>${draft.existing ? 'Edit' : 'New'} ${draft.kind.replace(/s$/, '')}</h2>
-          <p class="muted">The JSON is what gets stored. The form edits the common fields and keeps the rest of the object.</p>
+          <p class="muted">${draft.copiedFrom
+            ? `Copy of ${escapeHtml(draft.copiedFrom)}. The id and local id were changed so saving adds a new card.`
+            : 'The JSON is what gets stored. The form edits the common fields and keeps the rest of the object.'}</p>
         </div>
         <div class="row-actions">
           <button type="button" id="cancel">Back</button>
@@ -599,10 +739,41 @@ async function loadRecord(kind, lang, id) {
   }
 }
 
-function openEditor(kind, record, lang = 'en', existing = false) {
-  state.editing = { kind, record, lang: lang || 'en', existing }
+function openEditor(kind, record, lang = 'en', existing = false, copiedFrom = '') {
+  state.editing = { kind, record, lang: lang || 'en', existing, copiedFrom }
   state.error = ''
   renderEditor()
+}
+
+async function exportCatalog() {
+  try {
+    const bundle = await api('/manage/api/export')
+    const blob = new Blob([`${JSON.stringify(bundle, null, 2)}\n`], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'tcgdex-custom.json'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  } catch (error) {
+    state.error = error.message
+    render()
+  }
+}
+
+async function duplicateRecord(lang, id) {
+  try {
+    const result = await api('/manage/api/duplicate', {
+      method: 'POST',
+      body: { kind: 'cards', lang, id },
+    })
+    openEditor(result.kind, result.record, result.lang, false, result.copiedFrom)
+  } catch (error) {
+    state.error = error.message
+    render()
+  }
 }
 
 function openJsonImport(kind) {

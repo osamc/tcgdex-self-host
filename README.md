@@ -67,6 +67,8 @@ The dashboard shows request counts, error counts, average latency, an approximat
 
 **Deck test** parses a PTCGL or Limitless list with [pokemon-tcg-deck-parser](https://www.npmjs.com/package/pokemon-tcg-deck-parser) against this server. Each resolved card is shown with the image the library received, including custom and overridden prints.
 
+**Needed** is a tracker for cards that still have to be implemented. Each entry can record a language, name, set, local id, and note. Marking one done keeps it on the list. The list is stored in `data/needed.json` and is not part of the public card API.
+
 ## Custom cards, sets, and series
 
 Create records in the UI, or copy the examples into the data directory and restart is not required (the manager watches the folder):
@@ -101,6 +103,10 @@ To override an official card, use **Import upstream** in the UI. Card ids look l
 ```
 
 A bare card, set, or series object works too. The language selected in the dialog is used when the JSON does not include one. Saving an id that already exists replaces that file.
+
+**Export** downloads every locally saved card, set, and series as that same bundle (`tcgdex-custom.json`). Each record includes its language, and internal fields are omitted, so the file can be imported on another server. Overrides are included. Importing one marks it as an override again when that id still exists upstream.
+
+On an overridden card, **Duplicate** opens a new card filled in from that override. The id and local id gain a `-copy` suffix (or `-copy-2`, and so on, when that id is already used) so saving adds a card beside the official one instead of replacing the override.
 
 ## Preseeded Unown UF card
 

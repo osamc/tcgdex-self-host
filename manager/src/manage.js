@@ -4,7 +4,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { localApiEndpoint, parseDeckList } from './deck.js'
 import { IMAGE_TYPES, publicAssetPath, publicAssetUrl, resolveImageFile, safeImageRelPath, writeImageFile } from './images.js'
 import { isLanguage } from './languages.js'
-import { isSafeId, isSafeLocalId, validateCard, validateSerie, validateSet } from './store.js'
+import { ID_MAX_LENGTH, LOCAL_ID_MAX_LENGTH, isSafeId, isSafeLocalId, nextCopyId, validateCard, validateSerie, validateSet } from './store.js'
 
 const VALIDATORS = {
   cards: validateCard,
@@ -71,12 +71,24 @@ export async function handleManagement(req, res, ctx) {
     sendJson(res, 200, ctx.store.list())
     return true
   }
+  if (req.method === 'GET' && action === 'export') {
+    sendExport(url, res, ctx)
+    return true
+  }
   if (req.method === 'POST' && action === 'import') {
     await handleImport(req, res, ctx)
     return true
   }
+  if (req.method === 'POST' && action === 'duplicate') {
+    await handleDuplicate(req, res, ctx)
+    return true
+  }
   if (req.method === 'POST' && action === 'parse-deck') {
     await handleParseDeck(req, res)
+    return true
+  }
+  if (action === 'needed') {
+    await handleNeeded(parts[3], req, res, ctx)
     return true
   }
   if (action === 'images' && parts[3] && req.method === 'PUT') {
@@ -162,6 +174,44 @@ async function annotate(kind, lang, id, body, upstream) {
   return saved
 }
 
+async function handleNeeded(id, req, res, ctx) {
+  if (!id && req.method === 'GET') {
+    sendJson(res, 200, { items: ctx.needed.list() })
+    return
+  }
+  if (!id && req.method === 'POST') {
+    const body = await readJson(req, res)
+    if (body == null) return
+    try {
+      sendJson(res, 200, ctx.needed.add(body))
+    } catch (error) {
+      sendJson(res, error.status || 400, { error: error.message })
+    }
+    return
+  }
+  if (!id) {
+    sendJson(res, 405, { error: 'method not allowed' })
+    return
+  }
+  if (req.method === 'PUT') {
+    const body = await readJson(req, res)
+    if (body == null) return
+    try {
+      const updated = ctx.needed.update(id, body)
+      sendJson(res, updated ? 200 : 404, updated || { error: 'not found' })
+    } catch (error) {
+      sendJson(res, error.status || 400, { error: error.message })
+    }
+    return
+  }
+  if (req.method === 'DELETE') {
+    const removed = ctx.needed.remove(id)
+    sendJson(res, removed ? 200 : 404, removed ? { ok: true } : { error: 'not found' })
+    return
+  }
+  sendJson(res, 405, { error: 'method not allowed' })
+}
+
 async function handleParseDeck(req, res) {
   const body = await readJson(req, res)
   if (body == null) return
@@ -225,6 +275,56 @@ async function handleImport(req, res, ctx) {
   } catch {
     sendJson(res, 502, { error: 'upstream is unavailable' })
   }
+}
+
+function sendExport(url, res, ctx) {
+  const requested = url.searchParams.get('kind')
+  const bundle = ctx.store.exportDocument()
+  if (!requested) {
+    sendJson(res, 200, bundle)
+    return
+  }
+  const kind = normalizeKind(requested)
+  if (!kind) {
+    sendJson(res, 400, { error: 'kind must be cards, sets, or series' })
+    return
+  }
+  sendJson(res, 200, { cards: [], sets: [], series: [], [kind]: bundle[kind] })
+}
+
+async function handleDuplicate(req, res, ctx) {
+  const body = await readJson(req, res)
+  if (body == null) return
+  const lang = body.lang
+  const id = String(body.id || '').trim()
+  if (body.kind !== 'cards' || !isLanguage(lang) || !isSafeId(id)) {
+    sendJson(res, 400, { error: 'an overridden card needs kind, lang, and id' })
+    return
+  }
+  const found = ctx.store.get('cards', lang, id)
+  if (!found) {
+    sendJson(res, 404, { error: 'not found' })
+    return
+  }
+  if (!found._meta?.upstream) {
+    sendJson(res, 400, { error: 'only an overridden card can be duplicated' })
+    return
+  }
+  const record = JSON.parse(JSON.stringify(found))
+  delete record._meta
+  delete record._lang
+  delete record.updated
+  const cards = ctx.store.snapshot(lang).cards
+  record.id = nextCopyId(found.id, cards.map((card) => card.id), ID_MAX_LENGTH)
+  const setId = String(record.set?.id || '').toLowerCase()
+  const takenLocal = cards
+    .filter((card) => String(card.set?.id || '').toLowerCase() === setId)
+    .map((card) => card.localId)
+  record.localId = nextCopyId(String(found.localId ?? ''), takenLocal, LOCAL_ID_MAX_LENGTH)
+  if (typeof record.name === 'string' && record.name && !record.name.endsWith(' copy')) {
+    record.name = `${record.name} copy`
+  }
+  sendJson(res, 200, { kind: 'cards', lang, copiedFrom: found.id, record })
 }
 
 function isJsonImport(body) {
