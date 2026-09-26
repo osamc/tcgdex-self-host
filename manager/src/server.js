@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { resolveRequest } from './catalog.js'
 import { handleManagement, readBody, sendJson } from './manage.js'
 import { createMetrics, templatePath } from './metrics.js'
+import { createNeeded } from './needed.js'
 import { seedCatalog } from './seed.js'
 import { createStore } from './store.js'
 import { createUpstream } from './upstream.js'
@@ -41,8 +42,9 @@ export function createApp(options) {
     ttlMs: (options.cacheTtlSeconds ?? 300) * 1000,
   })
   const metrics = createMetrics(dataDir)
+  const needed = createNeeded(dataDir)
   const publicDir = options.publicDir || path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public')
-  const ctx = { store, upstream, metrics, token, publicDir, dataDir }
+  const ctx = { store, upstream, metrics, needed, token, publicDir, dataDir }
 
   const server = http.createServer(async (req, res) => {
     const started = Date.now()

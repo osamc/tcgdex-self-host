@@ -67,6 +67,8 @@ The dashboard shows request counts, error counts, average latency, an approximat
 
 **Deck test** parses a PTCGL or Limitless list with [pokemon-tcg-deck-parser](https://www.npmjs.com/package/pokemon-tcg-deck-parser) against this server. Each resolved card is shown with the image the library received, including custom and overridden prints.
 
+**Needed** is a tracker for cards that still have to be implemented. Each entry can record a language, name, set, local id, and note. Marking one done keeps it on the list. The list is stored in `data/needed.json` and is not part of the public card API.
+
 ## Custom cards, sets, and series
 
 Create records in the UI, or copy the examples into the data directory and restart is not required (the manager watches the folder):

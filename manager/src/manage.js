@@ -87,6 +87,10 @@ export async function handleManagement(req, res, ctx) {
     await handleParseDeck(req, res)
     return true
   }
+  if (action === 'needed') {
+    await handleNeeded(parts[3], req, res, ctx)
+    return true
+  }
   if (action === 'images' && parts[3] && req.method === 'PUT') {
     await handleImageUpload(parts.slice(3).join('/'), req, res, ctx)
     return true
@@ -168,6 +172,44 @@ async function annotate(kind, lang, id, body, upstream) {
   }
   if (!saved.updated) saved.updated = saved._meta.savedAt
   return saved
+}
+
+async function handleNeeded(id, req, res, ctx) {
+  if (!id && req.method === 'GET') {
+    sendJson(res, 200, { items: ctx.needed.list() })
+    return
+  }
+  if (!id && req.method === 'POST') {
+    const body = await readJson(req, res)
+    if (body == null) return
+    try {
+      sendJson(res, 200, ctx.needed.add(body))
+    } catch (error) {
+      sendJson(res, error.status || 400, { error: error.message })
+    }
+    return
+  }
+  if (!id) {
+    sendJson(res, 405, { error: 'method not allowed' })
+    return
+  }
+  if (req.method === 'PUT') {
+    const body = await readJson(req, res)
+    if (body == null) return
+    try {
+      const updated = ctx.needed.update(id, body)
+      sendJson(res, updated ? 200 : 404, updated || { error: 'not found' })
+    } catch (error) {
+      sendJson(res, error.status || 400, { error: error.message })
+    }
+    return
+  }
+  if (req.method === 'DELETE') {
+    const removed = ctx.needed.remove(id)
+    sendJson(res, removed ? 200 : 404, removed ? { ok: true } : { error: 'not found' })
+    return
+  }
+  sendJson(res, 405, { error: 'method not allowed' })
 }
 
 async function handleParseDeck(req, res) {
