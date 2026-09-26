@@ -89,6 +89,7 @@ main { padding: 1.25rem; }
 table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
 th, td { text-align: left; padding: 0.45rem 0.35rem; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; }
+td.actions { display: flex; gap: 0.35rem; flex-wrap: wrap; }
 .pill { display: inline-block; border-radius: 999px; padding: 0.1rem 0.45rem; font-size: 0.75rem; border: 1px solid var(--line); }
 .pill.up, .pill.custom { color: var(--green); border-color: rgba(61, 190, 139, 0.45); }
 .pill.down, .pill.err { color: var(--red); border-color: rgba(239, 107, 115, 0.5); }

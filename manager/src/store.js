@@ -13,12 +13,32 @@ const KINDS = {
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._%!-]{0,120}$/
 const LOCAL_ID_PATTERN = /^[A-Za-z0-9._%!-]{1,40}$/
 
+export const ID_MAX_LENGTH = 121
+export const LOCAL_ID_MAX_LENGTH = 40
+
 export function isSafeId(value) {
   return typeof value === 'string' && ID_PATTERN.test(value) && !value.includes('..')
 }
 
 export function isSafeLocalId(value) {
   return typeof value === 'string' && LOCAL_ID_PATTERN.test(value) && !value.includes('..')
+}
+
+/**
+ * Next unused id for a duplicated record. `taken` is compared case-insensitively.
+ * The suffix is `-copy`, then `-copy-2`, `-copy-3`, and so on.
+ */
+export function nextCopyId(original, taken, maxLength) {
+  const used = new Set()
+  for (const value of taken || []) used.add(String(value).toLowerCase())
+  const stem = String(original)
+  for (let n = 1; n < 1000; n += 1) {
+    const suffix = n === 1 ? '-copy' : `-copy-${n}`
+    if (suffix.length >= maxLength) break
+    const candidate = `${stem.slice(0, maxLength - suffix.length)}${suffix}`
+    if (!candidate.includes('..') && !used.has(candidate.toLowerCase())) return candidate
+  }
+  throw new Error('could not find an unused copy id')
 }
 
 export function createStore(dir) {
@@ -159,6 +179,22 @@ export function createStore(dir) {
       fs.unlinkSync(file)
       invalidate()
       return true
+    },
+    exportDocument() {
+      const catalog = readCatalog()
+      const publish = (item) => {
+        const copy = JSON.parse(JSON.stringify(item))
+        const lang = copy._lang
+        delete copy._meta
+        delete copy._lang
+        return { lang, ...copy }
+      }
+      const byLangThenId = (left, right) => left.lang.localeCompare(right.lang) || String(left.id).localeCompare(String(right.id))
+      return {
+        cards: catalog.cards.map(publish).sort(byLangThenId),
+        sets: catalog.sets.map(publish).sort(byLangThenId),
+        series: catalog.series.map(publish).sort(byLangThenId),
+      }
     },
   }
 }

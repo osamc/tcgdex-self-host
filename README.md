@@ -102,6 +102,10 @@ To override an official card, use **Import upstream** in the UI. Card ids look l
 
 A bare card, set, or series object works too. The language selected in the dialog is used when the JSON does not include one. Saving an id that already exists replaces that file.
 
+**Export** downloads every locally saved card, set, and series as that same bundle (`tcgdex-custom.json`). Each record includes its language, and internal fields are omitted, so the file can be imported on another server. Overrides are included. Importing one marks it as an override again when that id still exists upstream.
+
+On an overridden card, **Duplicate** opens a new card filled in from that override. The id and local id gain a `-copy` suffix (or `-copy-2`, and so on, when that id is already used) so saving adds a card beside the official one instead of replacing the override.
+
 ## Preseeded Unown UF card
 
 On startup the manager copies these files into `data/` when they are not already there:

@@ -123,11 +123,15 @@ function render() {
   else main.innerHTML = catalogHtml(state.tab)
   bindDeck(main)
   main.querySelector('[data-new]')?.addEventListener('click', () => openEditor(state.tab, blank(state.tab)))
+  main.querySelector('[data-export]')?.addEventListener('click', () => exportCatalog())
   main.querySelector('[data-import]')?.addEventListener('click', () => openImport(state.tab))
   main.querySelector('[data-import-json]')?.addEventListener('click', () => openJsonImport(state.tab))
   if (state.jsonImport) bindJsonImport(main)
   main.querySelectorAll('[data-edit]').forEach((button) => {
     button.addEventListener('click', () => loadRecord(state.tab, button.dataset.lang, button.dataset.edit))
+  })
+  main.querySelectorAll('[data-duplicate]').forEach((button) => {
+    button.addEventListener('click', () => duplicateRecord(button.dataset.lang, button.dataset.duplicate))
   })
   main.querySelectorAll('[data-delete]').forEach((button) => {
     button.addEventListener('click', () => removeRecord(state.tab, button.dataset.lang, button.dataset.delete))
@@ -314,8 +318,9 @@ function catalogHtml(kind) {
         <td>${escapeHtml(row.name || '')}</td>
         <td>${escapeHtml(kind === 'cards' ? row.setName : kind === 'sets' ? row.serieName : '')}</td>
         <td><span class="pill ${row.upstream ? 'override' : 'custom'}">${row.upstream ? 'override' : 'custom'}</span></td>
-        <td>
+        <td class="actions">
           <button type="button" data-edit="${escapeAttr(row.id)}" data-lang="${escapeAttr(row.lang)}">Edit</button>
+          ${row.upstream && kind === 'cards' ? `<button type="button" data-duplicate="${escapeAttr(row.id)}" data-lang="${escapeAttr(row.lang)}">Duplicate</button>` : ''}
           <button type="button" class="danger" data-delete="${escapeAttr(row.id)}" data-lang="${escapeAttr(row.lang)}">Delete</button>
         </td>
       </tr>`).join('')
@@ -330,6 +335,7 @@ function catalogHtml(kind) {
         <p class="muted">Same id as an upstream record replaces that record. A new id is added beside the official catalog.</p>
       </div>
       <div class="row-actions">
+        <button type="button" data-export title="Download every saved card, set, and series as JSON">Export</button>
         <button type="button" data-import-json>Import JSON</button>
         <button type="button" data-import>Import upstream</button>
         <button class="primary" type="button" data-new>New</button>
@@ -353,7 +359,9 @@ function renderEditor() {
       <div class="top">
         <div>
           <h2>${draft.existing ? 'Edit' : 'New'} ${draft.kind.replace(/s$/, '')}</h2>
-          <p class="muted">The JSON is what gets stored. The form edits the common fields and keeps the rest of the object.</p>
+          <p class="muted">${draft.copiedFrom
+            ? `Copy of ${escapeHtml(draft.copiedFrom)}. The id and local id were changed so saving adds a new card.`
+            : 'The JSON is what gets stored. The form edits the common fields and keeps the rest of the object.'}</p>
         </div>
         <div class="row-actions">
           <button type="button" id="cancel">Back</button>
@@ -599,10 +607,41 @@ async function loadRecord(kind, lang, id) {
   }
 }
 
-function openEditor(kind, record, lang = 'en', existing = false) {
-  state.editing = { kind, record, lang: lang || 'en', existing }
+function openEditor(kind, record, lang = 'en', existing = false, copiedFrom = '') {
+  state.editing = { kind, record, lang: lang || 'en', existing, copiedFrom }
   state.error = ''
   renderEditor()
+}
+
+async function exportCatalog() {
+  try {
+    const bundle = await api('/manage/api/export')
+    const blob = new Blob([`${JSON.stringify(bundle, null, 2)}\n`], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'tcgdex-custom.json'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  } catch (error) {
+    state.error = error.message
+    render()
+  }
+}
+
+async function duplicateRecord(lang, id) {
+  try {
+    const result = await api('/manage/api/duplicate', {
+      method: 'POST',
+      body: { kind: 'cards', lang, id },
+    })
+    openEditor(result.kind, result.record, result.lang, false, result.copiedFrom)
+  } catch (error) {
+    state.error = error.message
+    render()
+  }
 }
 
 function openJsonImport(kind) {
