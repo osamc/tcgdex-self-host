@@ -13,6 +13,8 @@ const PNG = Buffer.from(
 test('upload names accept a flat file or a quality variant', () => {
   assert.equal(safeImageRelPath('Demo-001.PNG'), 'demo-001.png')
   assert.equal(safeImageRelPath('demo-001/low.webp'), 'demo-001/low.webp')
+  assert.equal(safeImageRelPath('exu-m.png'), 'exu-m.png')
+  assert.equal(safeImageRelPath('exu-!.png'), 'exu-!.png')
   assert.equal(safeImageRelPath('../secret.png'), null)
   assert.equal(safeImageRelPath('demo-001/medium.webp'), null)
 })

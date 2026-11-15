@@ -2,6 +2,7 @@ const app = document.querySelector('#app')
 const LANGUAGES = ['en', 'fr', 'es', 'es-mx', 'it', 'pt', 'pt-br', 'pt-pt', 'de', 'nl', 'pl', 'ru', 'ja', 'ko', 'zh-tw', 'id', 'th', 'zh-cn']
 const KINDS = ['cards', 'sets', 'series']
 const SEARCH_LIMIT = 240
+const DECK_SAMPLE = 'Pokémon: 24\n2 Unown UF M\n'
 
 const state = {
   token: read(sessionStorage, 'tcgdex-token') || '',
@@ -10,6 +11,9 @@ const state = {
   metrics: null,
   catalog: { cards: [], sets: [], series: [], problems: [] },
   editing: null,
+  needed: { items: [], error: '', draft: { lang: 'en', name: '', set: '', localId: '', notes: '' } },
+  deck: { lang: 'en', text: 'Pokémon: 24\n2 Unown UF M\n', result: null, error: '', busy: false },
+  jsonImport: null,
   returnTo: '',
   suppressHash: false,
   renderId: 0,
@@ -113,6 +117,10 @@ function onRoute() {
     else renderBrowse(main, lang, r.query.get('q') || '', id)
   } else if (KINDS.includes(r.view)) {
     renderCatalog(main, r.view)
+  } else if (r.view === 'needed') {
+    renderNeeded(main)
+  } else if (r.view === 'deck') {
+    renderDeck(main)
   } else {
     go('#/dashboard')
   }
@@ -125,9 +133,14 @@ function stale(id) {
 // ---------------------------------------------------------------- api
 
 async function refresh() {
-  const [metrics, catalog] = await Promise.all([api('/manage/api/metrics'), api('/manage/api/catalog')])
+  const [metrics, catalog, needed] = await Promise.all([
+    api('/manage/api/metrics'),
+    api('/manage/api/catalog'),
+    api('/manage/api/needed').catch(() => ({ items: state.needed.items })),
+  ])
   state.metrics = metrics
   state.catalog = catalog
+  state.needed.items = needed.items || []
 }
 
 async function refreshCatalog() {
@@ -209,6 +222,9 @@ function renderShell(active) {
         ${navLink('cards', 'Cards', active, '#/cards', counts.cards)}
         ${navLink('sets', 'Sets', active, '#/sets', counts.sets)}
         ${navLink('series', 'Series', active, '#/series', counts.series)}
+        <h4>Tools</h4>
+        ${navLink('needed', 'Needed', active, '#/needed', openNeeded())}
+        ${navLink('deck', 'Deck test', active)}
         <button type="button" id="lock">Lock</button>
       </aside>
       <main id="main"></main>
@@ -285,7 +301,7 @@ function dashboardHtml() {
       ${windowCell('Last minute', metrics.windows['1m'])}
       ${windowCell('Last 15 minutes', metrics.windows['15m'])}
       ${windowCell('Last 24 hours', metrics.windows['24h'])}
-      <article class="stat"><span>Local catalog</span><b>${state.catalog.cards.length}</b><span class="detail">cards · ${state.catalog.sets.length} sets · ${state.catalog.series.length} series</span></article>
+      <article class="stat"><span>Local catalog</span><b>${state.catalog.cards.length}</b><span class="detail">cards · ${state.catalog.sets.length} sets · ${state.catalog.series.length} series · ${openNeeded()} to implement</span></article>
     </section>
     <section class="panel">
       <h3>Requests per minute</h3>
@@ -471,6 +487,7 @@ function renderCatalog(main, kind) {
           <td>${localPill(row.upstream ? 'override' : 'custom')}</td>
           <td class="actions">
             <a class="button" href="${editHref}">Edit</a>
+            ${row.upstream && kind === 'cards' ? `<a class="button" href="#/new/cards?lang=${row.lang}&copy=${encodeURIComponent(row.id)}" title="New card filled in from this override">Duplicate</a>` : ''}
             <button type="button" class="danger" data-delete="${escapeAttr(row.id)}" data-lang="${escapeAttr(row.lang)}" data-upstream="${row.upstream ? '1' : ''}">${row.upstream ? 'Revert' : 'Delete'}</button>
           </td>
         </tr>`
@@ -486,12 +503,16 @@ function renderCatalog(main, kind) {
         <h2>Local ${kind}</h2>
         <p class="muted">Files in the data directory. An id that exists upstream replaces that record (override). A new id is added beside the official catalog (custom).</p>
       </div>
-      <a class="button primary" href="#/new/${kind}?lang=${state.lang}">New ${singular(kind)}</a>
+      <div class="row-actions">
+        <button type="button" id="export" title="Download every saved card, set, and series as JSON">Export</button>
+        <button type="button" id="import-json">Import JSON</button>
+        <a class="button primary" href="#/new/${kind}?lang=${state.lang}">New ${singular(kind)}</a>
+      </div>
     </div>
     <form class="panel open-form" id="open-form">
       <label class="inline">Language ${langSelect(state.lang, 'open-lang')}</label>
       <label class="grow">Open by id
-        <input id="open-id" placeholder="${kind === 'cards' ? 'swsh3-136' : kind === 'sets' ? 'swsh3' : 'swsh'}" required autocomplete="off">
+        <input id="open-id" placeholder="${kind === 'cards' ? 'swsh3-136, exu-M, or set/localId like exu/M' : kind === 'sets' ? 'swsh3' : 'swsh'}" required autocomplete="off">
       </label>
       <button type="submit">Open</button>
       <p class="muted">Opens the local record if there is one, otherwise loads the official record so you can override it.</p>
@@ -506,7 +527,8 @@ function renderCatalog(main, kind) {
         <thead><tr><th>Lang</th><th>Id</th><th>Name</th>${extraHead ? `<th>${extraHead}</th>` : ''}<th>Kind</th><th></th></tr></thead>
         <tbody id="rows">${body}</tbody>
       </table>
-    </section>`
+    </section>
+    ${state.jsonImport ? jsonImportHtml() : ''}`
   main.querySelector('#open-form').addEventListener('submit', (event) => {
     event.preventDefault()
     const lang = main.querySelector('#open-lang').value
@@ -514,6 +536,13 @@ function renderCatalog(main, kind) {
     if (value) go(`#/edit/${kind}/${lang}/${encodeURIComponent(value)}`)
   })
   main.querySelector('#open-lang').addEventListener('change', (event) => setLang(event.target.value))
+  main.querySelector('#export').addEventListener('click', exportCatalog)
+  main.querySelector('#import-json').addEventListener('click', () => {
+    state.jsonImport = state.jsonImport || { lang: state.lang, kind, text: '', error: '' }
+    state.jsonImport.kind = kind
+    renderCatalog(main, kind)
+  })
+  if (state.jsonImport) bindJsonImport(main, kind)
   const filter = main.querySelector('#row-filter')
   const langFilter = main.querySelector('#row-lang')
   const apply = () => {
@@ -592,6 +621,11 @@ async function loadDraft(kind, lang, id) {
 
 async function newDraft(kind, query) {
   const lang = LANGUAGES.includes(query.get('lang')) ? query.get('lang') : state.lang
+  const copy = query.get('copy')
+  if (kind === 'cards' && copy) {
+    const result = await api('/manage/api/duplicate', { method: 'POST', body: { kind: 'cards', lang, id: copy } })
+    return { kind, lang: result.lang, id: '', record: result.record, existing: false, local: null, copiedFrom: result.copiedFrom }
+  }
   const record = blank(kind)
   const setId = query.get('set')
   if (kind === 'cards' && setId) {
@@ -616,6 +650,7 @@ function editorTitle(draft) {
   const label = draft.record.name ? `${draft.record.name}` : ''
   if (draft.local === 'override') return `Edit override · ${label || draft.id}`
   if (draft.local === 'custom') return `Edit custom ${noun} · ${label || draft.id}`
+  if (draft.copiedFrom) return `Duplicate ${noun} · ${label || draft.copiedFrom}`
   if (draft.upstream) return `Override ${noun} · ${label || draft.id}`
   return `New ${noun}`
 }
@@ -623,6 +658,7 @@ function editorTitle(draft) {
 function editorSubtitle(draft) {
   if (draft.local === 'override') return `Replaces the official ${singular(draft.kind)} ${draft.lang}/${draft.id}${draft.meta?.savedAt ? ` · saved ${new Date(draft.meta.savedAt).toLocaleString()}` : ''}.`
   if (draft.local === 'custom') return `Added beside the official catalog${draft.meta?.savedAt ? ` · saved ${new Date(draft.meta.savedAt).toLocaleString()}` : ''}.`
+  if (draft.copiedFrom) return `Copy of ${draft.copiedFrom}. The id and local id were changed so saving adds a new card beside it.`
   if (draft.upstream) return 'Loaded from the official catalog. Change what you need and save to serve your version instead.'
   return 'A new id is added beside the official catalog. Using an official id overrides that record.'
 }
@@ -641,6 +677,7 @@ function renderEditor() {
       </div>
       <div class="row-actions">
         ${canCompare ? '<button type="button" id="compare">Compare with official</button>' : ''}
+        ${draft.kind === 'cards' && draft.local === 'override' ? `<a class="button" href="#/new/cards?lang=${draft.lang}&copy=${encodeURIComponent(draft.id)}" title="New card filled in from this override">Duplicate</a>` : ''}
         ${draft.existing ? `<button type="button" class="danger" id="remove">${draft.local === 'override' ? 'Revert to official' : 'Delete'}</button>` : ''}
         <button class="primary" type="button" id="save" title="Ctrl+S">Save</button>
       </div>
@@ -738,6 +775,7 @@ function drawFields() {
         <label class="wide">Public base URL written into the image field
           <input id="origin" value="${escapeAttr(state.origin)}">
         </label>
+        <p class="upload-status wide" id="image-upload-status" hidden></p>
         <p class="muted wide">Stored as <code>/assets/&lt;card id&gt;</code>. One file serves both qualities unless you also upload a low-res image. You can also drop an image onto the preview.</p>
       </fieldset>`
   } else if (draft.kind === 'sets') {
@@ -864,7 +902,7 @@ function bindDrop(zone) {
 
 async function uploadImage(file, quality = 'high', input = null) {
   if (!file) return
-  const sanitized = file.name.toLowerCase().replace(/[^a-z0-9._-]/g, '')
+  const sanitized = file.name.toLowerCase().replace(/[^a-z0-9._%!-]/g, '')
   const extMatch = sanitized.match(/\.(png|jpe?g|webp|gif)$/)
   if (!extMatch) return setError('Image must be png, jpg, jpeg, webp, or gif.')
   const stem = imageStem()
@@ -884,6 +922,14 @@ async function uploadImage(file, quality = 'high', input = null) {
     }
     if (input) input.value = ''
     setError('')
+    const where = `${state.origin}${saved.path}`
+    const status = app.querySelector('#image-upload-status')
+    if (status) {
+      status.hidden = false
+      status.textContent = quality === 'low'
+        ? `Low-res image stored. Clients will request ${where}/low.webp. Save the card to keep the image URL.`
+        : `Uploaded ${file.name}. Image URL set to ${where}. Save the card to apply it.`
+    }
     flash(quality === 'low' ? 'Low-res image uploaded' : 'Image uploaded. Save the card to use it.')
   } catch (error) {
     setError(error.message)
@@ -891,7 +937,7 @@ async function uploadImage(file, quality = 'high', input = null) {
 }
 
 function imageStem() {
-  const id = (app.querySelector('[data-field="id"]')?.value || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '')
+  const id = (app.querySelector('[data-field="id"]')?.value || '').trim().toLowerCase().replace(/[^a-z0-9._%!-]/g, '')
   if (id) return id
   const image = app.querySelector('[data-field="image"]')?.value || ''
   const match = image.match(/\/assets\/([^/?#]+?)(?:\.(?:png|jpe?g|webp|gif))?$/i)
@@ -1001,6 +1047,286 @@ function isDirty() {
     }
   }
   return stable(draft.record) !== draft.original
+}
+
+// ---------------------------------------------------------------- export / JSON import
+
+async function exportCatalog() {
+  try {
+    const bundle = await api('/manage/api/export')
+    const blob = new Blob([`${JSON.stringify(bundle, null, 2)}\n`], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'tcgdex-custom.json'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  } catch (error) {
+    flash(error.message, 'err')
+  }
+}
+
+function jsonImportHtml() {
+  const draft = state.jsonImport
+  return `
+    <div class="modal">
+      <form class="panel" id="json-import">
+        <h3>Import JSON</h3>
+        <p class="muted">Paste one card, set, or series, or a bundle with <code>cards</code>, <code>sets</code>, and <code>series</code> arrays (the format Export downloads). An existing id is replaced.</p>
+        <div class="fields">
+          <label>Language when the JSON has none ${langSelect(draft.lang || 'en', 'json-lang')}</label>
+          <label>Kind when it is not obvious
+            <select id="json-kind">
+              ${[['auto', 'Auto'], ['cards', 'Card'], ['sets', 'Set'], ['series', 'Series']].map(([value, label]) => `<option value="${value}" ${draft.kind === value ? 'selected' : ''}>${label}</option>`).join('')}
+            </select>
+          </label>
+          <label class="wide">Or load a file
+            <input type="file" id="json-file" accept="application/json,.json">
+          </label>
+        </div>
+        <label class="wide">JSON
+          <textarea id="json-body" spellcheck="false" placeholder='{"id":"uf-m","localId":"M","name":"Unown UF M","category":"Pokemon","set":{"id":"uf","name":"Unown UF"},"variants":{"normal":true},"image":"/assets/uf-m"}'></textarea>
+        </label>
+        <p class="error" id="json-error">${escapeHtml(draft.error || '')}</p>
+        <div class="row-actions">
+          <button type="button" id="json-cancel">Cancel</button>
+          <button class="primary" type="submit">Import</button>
+        </div>
+      </form>
+    </div>`
+}
+
+function bindJsonImport(main, kind) {
+  const form = main.querySelector('#json-import')
+  if (!form) return
+  const box = form.querySelector('#json-body')
+  const lang = form.querySelector('#json-lang')
+  const kindSelect = form.querySelector('#json-kind')
+  const errorSlot = form.querySelector('#json-error')
+  box.value = state.jsonImport.text || ''
+  box.focus()
+  const remember = () => {
+    state.jsonImport.lang = lang.value
+    state.jsonImport.kind = kindSelect.value
+    state.jsonImport.text = box.value
+  }
+  lang.addEventListener('change', remember)
+  kindSelect.addEventListener('change', remember)
+  box.addEventListener('input', remember)
+  form.querySelector('#json-file').addEventListener('change', async (event) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    box.value = await file.text()
+    remember()
+  })
+  form.querySelector('#json-cancel').addEventListener('click', () => {
+    state.jsonImport = null
+    renderCatalog(main, kind)
+  })
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault()
+    remember()
+    let document
+    try {
+      document = JSON.parse(box.value)
+    } catch (error) {
+      errorSlot.textContent = `JSON: ${error.message}`
+      return
+    }
+    try {
+      const result = await api('/manage/api/import', {
+        method: 'POST',
+        body: { lang: lang.value, kind: kindSelect.value === 'auto' ? undefined : kindSelect.value, document },
+      })
+      browseCache.clear()
+      await refreshCatalog()
+      state.jsonImport = null
+      renderCatalog(renderShell(kind), kind)
+      const count = result.saved?.length ?? 0
+      flash(`Imported ${count} record${count === 1 ? '' : 's'}`)
+    } catch (error) {
+      errorSlot.textContent = error.message
+    }
+  })
+}
+
+// ---------------------------------------------------------------- needed list
+
+function openNeeded() {
+  return (state.needed.items || []).filter((item) => !item.done).length
+}
+
+function renderNeeded(main) {
+  const items = state.needed.items || []
+  const draft = state.needed.draft
+  const body = items.length
+    ? items.map((item) => `<tr class="${item.done ? 'done' : ''}">
+        <td>${escapeHtml(item.lang)}</td>
+        <td>${escapeHtml(item.name)}</td>
+        <td>${item.set ? `<a href="#/browse/${escapeAttr(item.lang)}/${encodeURIComponent(item.set)}">${escapeHtml(item.set)}</a>` : ''}</td>
+        <td>${escapeHtml(item.localId || '')}</td>
+        <td>${escapeHtml(item.notes || '')}</td>
+        <td><span class="pill ${item.done ? 'custom' : 'override'}">${item.done ? 'done' : 'open'}</span></td>
+        <td class="actions">
+          ${!item.done && item.set ? `<a class="button" href="#/new/cards?lang=${escapeAttr(item.lang)}&set=${encodeURIComponent(item.set)}" title="Start a new card in this set">Create</a>` : ''}
+          <button type="button" data-needed-toggle="${escapeAttr(item.id)}">${item.done ? 'Reopen' : 'Done'}</button>
+          <button type="button" class="danger" data-needed-delete="${escapeAttr(item.id)}">Delete</button>
+        </td>
+      </tr>`).join('')
+    : '<tr><td colspan="7">No cards on the list yet. Add one that still needs to be implemented.</td></tr>'
+  main.innerHTML = `
+    <div class="top">
+      <div>
+        <h2>Cards to implement</h2>
+        <p class="muted">${openNeeded()} open. This list is saved on the server and stays after a restart.</p>
+      </div>
+    </div>
+    ${state.needed.error ? errorBox(state.needed.error) : ''}
+    <form class="panel" id="needed-form">
+      <div class="fields">
+        ${langField(draft.lang || state.lang)}
+        ${textField('name', 'Card name', draft.name || '')}
+        ${textField('set', 'Set id', draft.set || '')}
+        ${textField('localId', 'Local id', draft.localId || '')}
+        ${textField('notes', 'Notes', draft.notes || '', true)}
+      </div>
+      <div class="row-actions"><button class="primary" type="submit">Add card</button></div>
+    </form>
+    <section class="panel">
+      <table>
+        <thead><tr><th>Lang</th><th>Name</th><th>Set</th><th>Local id</th><th>Notes</th><th>Status</th><th></th></tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </section>`
+  const form = main.querySelector('#needed-form')
+  const readDraft = () => {
+    const value = (name) => form.querySelector(`[data-field="${name}"]`)?.value ?? ''
+    state.needed.draft = { lang: value('lang') || 'en', name: value('name'), set: value('set'), localId: value('localId'), notes: value('notes') }
+  }
+  form.querySelectorAll('[data-field]').forEach((input) => input.addEventListener('input', readDraft))
+  const reload = async (action) => {
+    try {
+      await action()
+      state.needed.error = ''
+      state.needed.items = (await api('/manage/api/needed')).items || []
+    } catch (error) {
+      state.needed.error = error.message
+    }
+    if (route().view === 'needed') renderNeeded(renderShell('needed'))
+  }
+  form.addEventListener('submit', (event) => {
+    event.preventDefault()
+    readDraft()
+    const next = state.needed.draft
+    if (!next.name.trim()) {
+      state.needed.error = 'Card name is required.'
+      renderNeeded(main)
+      return
+    }
+    reload(async () => {
+      await api('/manage/api/needed', { method: 'POST', body: next })
+      state.needed.draft = { lang: next.lang, name: '', set: '', localId: '', notes: '' }
+    })
+  })
+  main.querySelectorAll('[data-needed-toggle]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const item = state.needed.items.find((entry) => entry.id === button.dataset.neededToggle)
+      if (item) reload(() => api(`/manage/api/needed/${encodeURIComponent(item.id)}`, { method: 'PUT', body: { done: !item.done } }))
+    })
+  })
+  main.querySelectorAll('[data-needed-delete]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const item = state.needed.items.find((entry) => entry.id === button.dataset.neededDelete)
+      if (item && confirm(`Remove ${item.name} from the list?`)) {
+        reload(() => api(`/manage/api/needed/${encodeURIComponent(item.id)}`, { method: 'DELETE' }))
+      }
+    })
+  })
+}
+
+// ---------------------------------------------------------------- deck test
+
+function renderDeck(main) {
+  const deck = state.deck
+  const result = deck.result
+  const unresolved = result ? result.cards.filter((card) => !card.resolved).length : 0
+  const warnings = result?.warnings?.length
+    ? `<div class="banner">${result.warnings.map((warning) => escapeHtml(warning.line ? `Line ${warning.line}: ${warning.message}` : warning.message)).join('<br>')}</div>`
+    : ''
+  main.innerHTML = `
+    <div class="top">
+      <div>
+        <h2>Deck test</h2>
+        <p class="muted">Paste a PTCGL or Limitless list. pokemon-tcg-deck-parser resolves it against this server, then each card is shown with the image it returned. Click a card to override it.</p>
+      </div>
+    </div>
+    <form class="panel" id="deck-form">
+      <div class="toolbar">
+        <label class="inline">Language ${langSelect(deck.lang, 'deck-lang')}</label>
+        <span class="row-actions">
+          <button type="button" id="deck-sample">Load sample</button>
+          <button class="primary" type="submit" ${deck.busy ? 'disabled' : ''}>${deck.busy ? 'Parsing…' : 'Parse deck'}</button>
+        </span>
+      </div>
+      <label>Deck list
+        <textarea id="deck-text" class="deck-input" spellcheck="false"></textarea>
+      </label>
+      <p class="error">${escapeHtml(deck.error || '')}</p>
+    </form>
+    ${result ? `
+      <p class="muted deck-summary">${escapeHtml(result.format)} · ${result.totalCards} cards · ${result.cards.length} unique · ${unresolved} unresolved</p>
+      ${warnings}
+      ${result.cards.length ? `<div class="deck-grid">${result.cards.map((card) => deckCardHtml(card, deck.lang)).join('')}</div>` : '<p class="muted">That list did not contain any cards.</p>'}` : ''}`
+  const text = main.querySelector('#deck-text')
+  const lang = main.querySelector('#deck-lang')
+  text.value = deck.text
+  const remember = () => {
+    deck.text = text.value
+    deck.lang = lang.value
+  }
+  text.addEventListener('input', remember)
+  lang.addEventListener('change', remember)
+  main.querySelector('#deck-sample').addEventListener('click', () => {
+    text.value = DECK_SAMPLE
+    remember()
+  })
+  main.querySelector('#deck-form').addEventListener('submit', async (event) => {
+    event.preventDefault()
+    remember()
+    deck.busy = true
+    deck.error = ''
+    renderDeck(main)
+    try {
+      deck.result = await api('/manage/api/parse-deck', { method: 'POST', body: { lang: deck.lang, text: deck.text } })
+    } catch (error) {
+      deck.error = error.message
+    }
+    deck.busy = false
+    if (route().view === 'deck') renderDeck(main)
+  })
+}
+
+function deckCardHtml(card, lang) {
+  const image = card.image ? String(card.image).replace(/\/+$/, '') : ''
+  const src = image && !/\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(image) ? `${image}/low.webp` : image
+  const meta = card.resolved
+    ? [card.tcgdexId, card.localId && `#${card.localId}`, card.setCode, card.number].filter(Boolean).join(' · ')
+    : (card.unresolvedReason || 'Not found')
+  const art = src
+    ? `<img src="${escapeAttr(src)}" alt="${escapeAttr(card.name)}" ${src !== image ? `data-fallback="${escapeAttr(image)}"` : ''}>`
+    : ''
+  const inner = `
+      <div class="deck-art">
+        ${art}<span class="placeholder">${src ? 'Image failed' : 'No image'}</span>
+        <b class="qty">${escapeHtml(card.quantity)}</b>
+      </div>
+      <h3>${escapeHtml(card.name)}</h3>
+      <p>${escapeHtml(meta)}</p>`
+  return card.resolved && card.tcgdexId
+    ? `<a class="deck-card" href="#/edit/cards/${lang}/${encodeURIComponent(card.tcgdexId)}" title="Override or edit ${escapeAttr(card.tcgdexId)}">${inner}</a>`
+    : `<article class="deck-card ${card.resolved ? '' : 'missing'}">${inner}</article>`
 }
 
 // ---------------------------------------------------------------- helpers

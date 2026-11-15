@@ -31,7 +31,9 @@ services:
       start_period: 180s
 
   manager:
-    build: ./manager
+    build:
+      context: .
+      dockerfile: manager/Dockerfile
     container_name: tcgdex-manager
     restart: unless-stopped
     depends_on:

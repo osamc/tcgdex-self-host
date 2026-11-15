@@ -5,5 +5,8 @@
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test ./test/*.test.js"
+  },
+  "dependencies": {
+    "pokemon-tcg-deck-parser": "1.0.0"
   }
 }

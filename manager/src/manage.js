@@ -2,9 +2,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { timingSafeEqual } from 'node:crypto'
 import { resolveRequest } from './catalog.js'
-import { IMAGE_TYPES, publicAssetPath, resolveImageFile, safeImageRelPath, writeImageFile } from './images.js'
+import { localApiEndpoint, parseDeckList } from './deck.js'
+import { IMAGE_TYPES, publicAssetPath, publicAssetUrl, resolveImageFile, safeImageRelPath, writeImageFile } from './images.js'
 import { isLanguage } from './languages.js'
-import { isSafeId, validateCard, validateSerie, validateSet } from './store.js'
+import { ID_MAX_LENGTH, LOCAL_ID_MAX_LENGTH, isSafeId, isSafeLocalId, nextCopyId, validateCard, validateSerie, validateSet } from './store.js'
 
 const VALIDATORS = {
   cards: validateCard,
@@ -75,8 +76,24 @@ export async function handleManagement(req, res, ctx) {
     await handleBrowse(parts.slice(3), url.search, res, ctx)
     return true
   }
+  if (req.method === 'GET' && action === 'export') {
+    sendExport(url, res, ctx)
+    return true
+  }
   if (req.method === 'POST' && action === 'import') {
     await handleImport(req, res, ctx)
+    return true
+  }
+  if (req.method === 'POST' && action === 'duplicate') {
+    await handleDuplicate(req, res, ctx)
+    return true
+  }
+  if (req.method === 'POST' && action === 'parse-deck') {
+    await handleParseDeck(req, res)
+    return true
+  }
+  if (action === 'needed') {
+    await handleNeeded(parts[3], req, res, ctx)
     return true
   }
   if (action === 'images' && parts[3] && req.method === 'PUT') {
@@ -132,6 +149,18 @@ async function annotate(kind, lang, id, body, upstream) {
   const saved = { ...body }
   delete saved._meta
   delete saved._lang
+  if (kind === 'cards' && typeof saved.image === 'string') {
+    const image = publicAssetUrl(saved.image.trim())
+    if (image) saved.image = image
+    else delete saved.image
+  }
+  for (const key of ['logo', 'symbol']) {
+    if (typeof saved[key] === 'string') {
+      const media = publicAssetUrl(saved[key].trim())
+      if (media) saved[key] = media
+      else delete saved[key]
+    }
+  }
   let upstreamHit = false
   let upstreamSetId = null
   try {
@@ -199,17 +228,96 @@ function tagLocal(body, endpoint, id, local) {
   return tagged
 }
 
+async function handleNeeded(id, req, res, ctx) {
+  if (!id && req.method === 'GET') {
+    sendJson(res, 200, { items: ctx.needed.list() })
+    return
+  }
+  if (!id && req.method === 'POST') {
+    const body = await readJson(req, res)
+    if (body == null) return
+    try {
+      sendJson(res, 200, ctx.needed.add(body))
+    } catch (error) {
+      sendJson(res, error.status || 400, { error: error.message })
+    }
+    return
+  }
+  if (!id) {
+    sendJson(res, 405, { error: 'method not allowed' })
+    return
+  }
+  if (req.method === 'PUT') {
+    const body = await readJson(req, res)
+    if (body == null) return
+    try {
+      const updated = ctx.needed.update(id, body)
+      sendJson(res, updated ? 200 : 404, updated || { error: 'not found' })
+    } catch (error) {
+      sendJson(res, error.status || 400, { error: error.message })
+    }
+    return
+  }
+  if (req.method === 'DELETE') {
+    const removed = ctx.needed.remove(id)
+    sendJson(res, removed ? 200 : 404, removed ? { ok: true } : { error: 'not found' })
+    return
+  }
+  sendJson(res, 405, { error: 'method not allowed' })
+}
+
+async function handleParseDeck(req, res) {
+  const body = await readJson(req, res)
+  if (body == null) return
+  const lang = body.lang || 'en'
+  if (!isLanguage(lang)) {
+    sendJson(res, 400, { error: 'language is invalid' })
+    return
+  }
+  try {
+    const deck = await parseDeckList(body.text, { lang, endpoint: localApiEndpoint(req) })
+    sendJson(res, 200, deck)
+  } catch (error) {
+    const status = error.status || 502
+    sendJson(res, status, { error: error.message || 'could not parse that deck' })
+  }
+}
+
 async function handleImport(req, res, ctx) {
   const body = await readJson(req, res)
   if (body == null) return
+  if (isJsonImport(body)) {
+    await handleJsonImport(body, res, ctx)
+    return
+  }
   const kind = body.kind === 'series' ? 'series' : body.kind
-  if (!['cards', 'sets', 'series'].includes(kind) || !isLanguage(body.lang) || !isSafeId(String(body.id || ''))) {
+  const lang = body.lang
+  const rawId = String(body.id || '').trim()
+  if (!['cards', 'sets', 'series'].includes(kind) || !isLanguage(lang) || !rawId) {
     sendJson(res, 400, { error: 'kind, lang, and id are required' })
     return
   }
   const endpoint = kind === 'series' ? 'series' : kind
+  let upstreamPath
+  if (kind === 'cards' && rawId.includes('/')) {
+    const parts = rawId.split('/')
+    if (parts.length !== 2 || !isSafeId(parts[0]) || !isSafeLocalId(parts[1])) {
+      sendJson(res, 400, {
+        error: 'use a card id like exu-M, or set/localId like exu/M',
+      })
+      return
+    }
+    upstreamPath = `/v2/${lang}/sets/${encodeURIComponent(parts[0])}/${encodeURIComponent(parts[1])}`
+  } else if (!isSafeId(rawId)) {
+    sendJson(res, 400, {
+      error: 'id may contain letters, numbers, dots, underscores, hyphens, %, and !',
+    })
+    return
+  } else {
+    upstreamPath = `/v2/${lang}/${endpoint}/${encodeURIComponent(rawId)}`
+  }
   try {
-    const existing = await ctx.upstream.request(`/v2/${body.lang}/${endpoint}/${encodeURIComponent(body.id)}`)
+    const existing = await ctx.upstream.request(upstreamPath)
     if (existing.status !== 200 || !existing.json || Array.isArray(existing.json)) {
       sendJson(res, 404, { error: 'upstream does not have that record' })
       return
@@ -217,10 +325,167 @@ async function handleImport(req, res, ctx) {
     const record = { ...existing.json }
     delete record.cards
     delete record.sets
-    sendJson(res, 200, { kind, lang: body.lang, record, upstream: true })
+    sendJson(res, 200, { kind, lang, record, upstream: true })
   } catch {
     sendJson(res, 502, { error: 'upstream is unavailable' })
   }
+}
+
+function sendExport(url, res, ctx) {
+  const requested = url.searchParams.get('kind')
+  const bundle = ctx.store.exportDocument()
+  if (!requested) {
+    sendJson(res, 200, bundle)
+    return
+  }
+  const kind = normalizeKind(requested)
+  if (!kind) {
+    sendJson(res, 400, { error: 'kind must be cards, sets, or series' })
+    return
+  }
+  sendJson(res, 200, { cards: [], sets: [], series: [], [kind]: bundle[kind] })
+}
+
+async function handleDuplicate(req, res, ctx) {
+  const body = await readJson(req, res)
+  if (body == null) return
+  const lang = body.lang
+  const id = String(body.id || '').trim()
+  if (body.kind !== 'cards' || !isLanguage(lang) || !isSafeId(id)) {
+    sendJson(res, 400, { error: 'an overridden card needs kind, lang, and id' })
+    return
+  }
+  const found = ctx.store.get('cards', lang, id)
+  if (!found) {
+    sendJson(res, 404, { error: 'not found' })
+    return
+  }
+  if (!found._meta?.upstream) {
+    sendJson(res, 400, { error: 'only an overridden card can be duplicated' })
+    return
+  }
+  const record = JSON.parse(JSON.stringify(found))
+  delete record._meta
+  delete record._lang
+  delete record.updated
+  const cards = ctx.store.snapshot(lang).cards
+  record.id = nextCopyId(found.id, cards.map((card) => card.id), ID_MAX_LENGTH)
+  const setId = String(record.set?.id || '').toLowerCase()
+  const takenLocal = cards
+    .filter((card) => String(card.set?.id || '').toLowerCase() === setId)
+    .map((card) => card.localId)
+  record.localId = nextCopyId(String(found.localId ?? ''), takenLocal, LOCAL_ID_MAX_LENGTH)
+  if (typeof record.name === 'string' && record.name && !record.name.endsWith(' copy')) {
+    record.name = `${record.name} copy`
+  }
+  sendJson(res, 200, { kind: 'cards', lang, copiedFrom: found.id, record })
+}
+
+function isJsonImport(body) {
+  if (Array.isArray(body)) return true
+  if (!body || typeof body !== 'object') return false
+  if (body.document !== undefined) return true
+  if (body.record && typeof body.record === 'object') return true
+  return Array.isArray(body.cards) || Array.isArray(body.sets) || Array.isArray(body.series)
+}
+
+async function handleJsonImport(body, res, ctx) {
+  const document = body.document !== undefined ? body.document : body
+  const fallback = { lang: body.lang, kind: body.kind }
+  let items
+  try {
+    items = collectJsonImports(document, fallback)
+  } catch (error) {
+    sendJson(res, 400, { error: error.message })
+    return
+  }
+  if (!items.length) {
+    sendJson(res, 400, { error: 'no cards, sets, or series found in JSON' })
+    return
+  }
+
+  const errors = []
+  const prepared = []
+  for (const item of items) {
+    const label = `${item.kind || 'record'} ${item.record?.id || '(missing id)'}`
+    if (!['cards', 'sets', 'series'].includes(item.kind)) {
+      errors.push(`${label}: kind must be cards, sets, or series`)
+      continue
+    }
+    if (!isLanguage(item.lang)) {
+      errors.push(`${label}: language is invalid`)
+      continue
+    }
+    const record = { ...item.record }
+    delete record._meta
+    delete record._lang
+    delete record.kind
+    delete record.lang
+    const problems = VALIDATORS[item.kind](record)
+    if (problems.length) errors.push(`${label}: ${problems.join('; ')}`)
+    else prepared.push({ kind: item.kind, lang: item.lang, record })
+  }
+  if (errors.length) {
+    sendJson(res, 400, { error: 'invalid definition', details: errors })
+    return
+  }
+
+  const saved = []
+  for (const item of prepared) {
+    const annotated = await annotate(item.kind, item.lang, item.record.id, item.record, ctx.upstream)
+    ctx.store.put(item.kind, item.lang, annotated.id, annotated)
+    saved.push({ kind: item.kind, lang: item.lang, id: annotated.id })
+  }
+  sendJson(res, 200, { saved })
+}
+
+/**
+ * Accept a single record, `{ kind, lang, record }`, or `{ cards, sets, series }`.
+ * Series and sets are ordered before cards.
+ */
+export function collectJsonImports(document, fallback = {}) {
+  if (Array.isArray(document)) {
+    return document.flatMap((item) => collectJsonImports(item, fallback))
+  }
+  if (!document || typeof document !== 'object') {
+    throw new Error('JSON import must be an object or an array')
+  }
+  const lang = document.lang || document._lang || fallback.lang
+  if (Array.isArray(document.cards) || Array.isArray(document.sets) || Array.isArray(document.series)) {
+    const items = []
+    for (const kind of ['series', 'sets', 'cards']) {
+      for (const record of document[kind] || []) {
+        if (!record || typeof record !== 'object' || Array.isArray(record)) {
+          throw new Error(`${kind} entries must be JSON objects`)
+        }
+        items.push({ kind, lang: record.lang || record._lang || lang, record })
+      }
+    }
+    return items
+  }
+  if (document.record && typeof document.record === 'object' && !Array.isArray(document.record)) {
+    const kind = normalizeKind(document.kind || fallback.kind)
+    return [{ kind, lang, record: document.record }]
+  }
+  const kind = normalizeKind(
+    ['cards', 'sets', 'series'].includes(document.kind) ? document.kind : (fallback.kind || inferKind(document)),
+  )
+  if (!kind) throw new Error('could not tell whether the JSON is a card, set, or series')
+  return [{ kind, lang, record: document }]
+}
+
+function normalizeKind(kind) {
+  if (kind === 'card') return 'cards'
+  if (kind === 'set') return 'sets'
+  if (kind === 'serie' || kind === 'series') return 'series'
+  return ['cards', 'sets', 'series'].includes(kind) ? kind : null
+}
+
+function inferKind(record) {
+  if (record.category || record.localId || record.variants || record.attacks) return 'cards'
+  if (record.serie || record.cardCount || record.abbreviation || record.tcgOnline || record.releaseDate) return 'sets'
+  if (record.id && record.name) return 'series'
+  return null
 }
 
 async function handleImageUpload(name, req, res, ctx) {

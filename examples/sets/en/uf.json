@@ -1,0 +1,16 @@
+{
+  "id": "uf",
+  "name": "Unown UF",
+  "serie": {
+    "id": "unown",
+    "name": "Unown"
+  },
+  "releaseDate": "2026-01-01",
+  "tcgOnline": "UF",
+  "abbreviation": {
+    "official": "UF"
+  },
+  "cardCount": {
+    "official": 1
+  }
+}

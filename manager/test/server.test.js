@@ -161,6 +161,134 @@ test('uploaded card images are served at high.webp and low.webp', async () => {
   }
 })
 
+test('Unown M from Unseen Forces can be imported, given an image, and served to clients', async () => {
+  const upstreamCard = {
+    category: 'Pokemon',
+    id: 'exu-M',
+    localId: 'M',
+    name: 'Unown',
+    rarity: 'Rare',
+    set: { id: 'exu', name: 'Unseen Forces Unown Collection', cardCount: { official: 28, total: 28 } },
+    variants: { firstEdition: false, holo: true, normal: false, reverse: false, wPromo: false },
+    hp: 60,
+    types: ['Psychic'],
+  }
+  const upstreamSet = {
+    id: 'exu',
+    name: 'Unseen Forces Unown Collection',
+    cardCount: { official: 28, total: 28 },
+    cards: [{ id: 'exu-M', localId: 'M', name: 'Unown' }],
+  }
+  const upstream = await listen((req, res) => {
+    const url = new URL(req.url, 'http://upstream.local')
+    if (url.pathname === '/ping') {
+      res.writeHead(200)
+      res.end('ok')
+      return
+    }
+    if (url.pathname === '/v2/en/cards/exu-M' || url.pathname === '/v2/en/sets/exu/M') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(upstreamCard))
+      return
+    }
+    if (url.pathname === '/v2/en/sets/exu') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(upstreamSet))
+      return
+    }
+    if (url.pathname === '/v2/en/cards') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify([{ id: 'exu-M', localId: 'M', name: 'Unown' }]))
+      return
+    }
+    if (url.pathname === '/v2/en/cards/exu-!' || url.pathname === '/v2/en/sets/exu/!') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ ...upstreamCard, id: 'exu-!', localId: '!' }))
+      return
+    }
+    res.writeHead(404, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ status: 404 }))
+  })
+
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tcgdex-unown-'))
+  const app = createApp({
+    token: TOKEN,
+    dataDir,
+    upstreamUrl: upstream.url,
+    cacheTtlSeconds: 0,
+    publicDir: path.join(import.meta.dirname, '..', 'public'),
+  })
+  await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${app.server.address().port}`
+  const auth = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' }
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64',
+  )
+
+  try {
+    const byPath = await fetch(`${base}/manage/api/import`, {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({ kind: 'cards', lang: 'en', id: 'exu/M' }),
+    })
+    assert.equal(byPath.status, 200)
+    assert.equal((await byPath.json()).record.id, 'exu-M')
+
+    const uploaded = await fetch(`${base}/manage/api/images/exu-m.png`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'image/png' },
+      body: png,
+    })
+    assert.equal(uploaded.status, 200)
+    assert.deepEqual(await uploaded.json(), { path: '/assets/exu-m', file: '/assets/exu-m.png' })
+
+    const saved = await fetch(`${base}/manage/api/cards/en/exu-M`, {
+      method: 'PUT',
+      headers: auth,
+      body: JSON.stringify({
+        ...upstreamCard,
+        image: `${base}/assets/exu-m.png`,
+      }),
+    })
+    assert.equal(saved.status, 200)
+    const savedBody = await saved.json()
+    assert.equal(savedBody._meta.upstream, true)
+    assert.equal(savedBody.image, `${base}/assets/exu-m`)
+
+    const detail = await fetch(`${base}/v2/en/cards/exu-M`)
+    assert.equal(detail.status, 200)
+    const card = await detail.json()
+    assert.equal(card.image, `${base}/assets/exu-m`)
+    assert.equal(card._meta, undefined)
+
+    for (const suffix of ['/high.webp', '/low.webp', '/high.png']) {
+      const asset = await fetch(`${card.image}${suffix}`)
+      assert.equal(asset.status, 200, suffix)
+      assert.equal(asset.headers.get('content-type'), 'image/png')
+    }
+
+    const fromSet = await fetch(`${base}/v2/en/sets/exu/M`)
+    assert.equal((await fromSet.json()).image, `${base}/assets/exu-m`)
+
+    const set = await fetch(`${base}/v2/en/sets/exu`)
+    assert.equal((await set.json()).cards[0].image, `${base}/assets/exu-m`)
+
+    const bang = await fetch(`${base}/manage/api/import`, {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({ kind: 'cards', lang: 'en', id: 'exu-!' }),
+    })
+    assert.equal(bang.status, 200)
+    assert.equal((await bang.json()).record.localId, '!')
+  } finally {
+    app.metrics.flush()
+    await new Promise((resolve) => app.server.close(resolve))
+    await new Promise((resolve) => upstream.server.close(resolve))
+    fs.rmSync(dataDir, { recursive: true, force: true })
+  }
+})
+
 test('a short management token is rejected at startup', () => {
   assert.throws(() => createApp({
     token: 'too-short',
