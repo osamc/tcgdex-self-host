@@ -296,3 +296,74 @@ test('a short management token is rejected at startup', () => {
     upstreamUrl: 'http://127.0.0.1:9',
   }), /MANAGEMENT_TOKEN/)
 })
+
+test('browse returns the merged catalog, tags local records, and is not counted as traffic', async () => {
+  const official = {
+    id: 'swsh3',
+    name: 'Darkness Ablaze',
+    cardCount: { official: 2, total: 2 },
+    cards: [
+      { id: 'swsh3-1', localId: '1', name: 'Butterfree V', image: 'https://assets.example/swsh3/1' },
+      { id: 'swsh3-2', localId: '2', name: 'Butterfree VMAX', image: 'https://assets.example/swsh3/2' },
+    ],
+  }
+  const upstream = await listen((req, res) => {
+    const send = (status, body) => {
+      res.writeHead(status, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(body))
+    }
+    if (req.url === '/ping') return send(200, 'ok')
+    if (req.url === '/v2/en/sets') return send(200, [{ id: 'swsh3', name: 'Darkness Ablaze', cardCount: { official: 2, total: 2 } }])
+    if (req.url === '/v2/en/sets/swsh3') return send(200, official)
+    if (req.url === '/v2/en/cards/swsh3-1') {
+      return send(200, { ...official.cards[0], category: 'Pokemon', set: { id: 'swsh3', name: 'Darkness Ablaze' }, variants: { normal: true } })
+    }
+    return send(404, { status: 404 })
+  })
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tcgdex-browse-'))
+  const app = createApp({ token: TOKEN, dataDir, upstreamUrl: upstream.url, cacheTtlSeconds: 0 })
+  await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${app.server.address().port}`
+  const auth = { authorization: `Bearer ${TOKEN}` }
+
+  try {
+    const before = await fetch(`${base}/manage/api/browse/en/sets/swsh3`, { headers: auth })
+    assert.equal(before.status, 200)
+    assert.equal((await before.json()).cards.some((card) => card._local), false)
+
+    const imported = await fetch(`${base}/manage/api/import`, {
+      method: 'POST',
+      headers: { ...auth, 'content-type': 'application/json' },
+      body: JSON.stringify({ kind: 'cards', lang: 'en', id: 'swsh3-1' }),
+    })
+    const { record } = await imported.json()
+    const saved = await fetch(`${base}/manage/api/cards/en/swsh3-1`, {
+      method: 'PUT',
+      headers: { ...auth, 'content-type': 'application/json' },
+      body: JSON.stringify({ ...record, name: 'Butterfree V (alt)' }),
+    })
+    assert.equal(saved.status, 200)
+
+    const set = await (await fetch(`${base}/manage/api/browse/en/sets/swsh3`, { headers: auth })).json()
+    assert.deepEqual(set.cards.map((card) => [card.id, card.name, card._local]), [
+      ['swsh3-1', 'Butterfree V (alt)', 'override'],
+      ['swsh3-2', 'Butterfree VMAX', undefined],
+    ])
+
+    const sets = await (await fetch(`${base}/manage/api/browse/en/sets`, { headers: auth })).json()
+    assert.equal(sets[0].id, 'swsh3')
+
+    const bad = await fetch(`${base}/manage/api/browse/xx/sets`, { headers: auth })
+    assert.equal(bad.status, 400)
+    const denied = await fetch(`${base}/manage/api/browse/en/sets`)
+    assert.equal(denied.status, 401)
+
+    const metrics = await (await fetch(`${base}/manage/api/metrics`, { headers: auth })).json()
+    assert.equal(metrics.windows['24h'].count, 0)
+  } finally {
+    app.metrics.flush()
+    await new Promise((resolve) => app.server.close(resolve))
+    await new Promise((resolve) => upstream.server.close(resolve))
+    fs.rmSync(dataDir, { recursive: true, force: true })
+  }
+})

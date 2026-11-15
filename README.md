@@ -65,9 +65,9 @@ Open `/manage` and enter `MANAGEMENT_TOKEN`. The token is only required for the 
 
 The dashboard shows request counts, error counts, average latency, an approximate p95 from recent samples, the busiest paths, and the latest calls. Counts are kept for 24 hours in `data/metrics.json`.
 
-**Deck test** parses a PTCGL or Limitless list with [pokemon-tcg-deck-parser](https://www.npmjs.com/package/pokemon-tcg-deck-parser) against this server. Each resolved card is shown with the image the library received, including custom and overridden prints.
+**Deck test** parses a PTCGL or Limitless list with [pokemon-tcg-deck-parser](https://www.npmjs.com/package/pokemon-tcg-deck-parser) against this server. Each resolved card is shown with the image the library received, including custom and overridden prints. Click a resolved card to override or edit it.
 
-**Needed** is a tracker for cards that still have to be implemented. Each entry can record a language, name, set, local id, and note. Marking one done keeps it on the list. The list is stored in `data/needed.json` and is not part of the public card API.
+**Needed** is a tracker for cards that still have to be implemented. Each entry can record a language, name, set, local id, and note. Marking one done keeps it on the list. The list is stored in `data/needed.json` and is not part of the public card API. An open entry with a set id has a **Create** button that starts a new card in that set.
 
 ## Custom cards, sets, and series
 
@@ -90,7 +90,9 @@ Languages are the ones TCGdex publishes: `en`, `fr`, `es`, `es-mx`, `it`, `pt`, 
 
 A saved card uses the same JSON shape as `GET /v2/{lang}/cards/{id}`. Saving an id that already exists upstream replaces that card everywhere the REST catalog lists it. A new id is added next to the official data. Sets and series work the same way. Cards inside a set are collected from the card files, so a set file does not embed its card list.
 
-To override an official card, use **Import upstream** in the UI. Card ids look like `swsh3-136` or `exu-M`. For set-scoped cards you can also enter `set/localId` (for example `exu/M` for Unown M from Unseen Forces Unown Collection).
+To override an official card, open **Browse sets** in the UI, pick a set, and click the card. The editor opens with the official record filled in; change what you need and save. Overridden cards are marked in the set view, **Compare with official** lists every field you changed (with a per-field reset), and **Revert to official** deletes the override. You can also type an id into **Open by id** on the Cards, Sets, or Series page. Card ids look like `swsh3-136` or `exu-M`; for set-scoped cards you can also enter `set/localId` (for example `exu/M` for Unown M from Unseen Forces Unown Collection). **Add card** on a set view starts a new card with the set and next number filled in.
+
+Browsing in the manager uses `/manage/api/browse/{lang}/{cards|sets|series}[/{id}]`, which returns the same merged data as the public API (tagged with `_local: "override" | "custom"`) without counting as API traffic. Pages have their own URLs (`/manage#/browse/en/swsh3`, `/manage#/edit/cards/en/swsh3-136`), so the back button and bookmarks work. `Ctrl+S` saves in the editor, and artwork can be dropped onto the preview to upload it.
 
 **Import JSON** accepts one record or a bundle and writes it into the data directory:
 
@@ -106,7 +108,7 @@ A bare card, set, or series object works too. The language selected in the dialo
 
 **Export** downloads every locally saved card, set, and series as that same bundle (`tcgdex-custom.json`). Each record includes its language, and internal fields are omitted, so the file can be imported on another server. Overrides are included. Importing one marks it as an override again when that id still exists upstream.
 
-On an overridden card, **Duplicate** opens a new card filled in from that override. The id and local id gain a `-copy` suffix (or `-copy-2`, and so on, when that id is already used) so saving adds a card beside the official one instead of replacing the override.
+On an overridden card (in the Cards table or the editor), **Duplicate** opens a new card filled in from that override. The id and local id gain a `-copy` suffix (or `-copy-2`, and so on, when that id is already used) so saving adds a card beside the official one instead of replacing the override.
 
 ## Preseeded Unown UF card
 
