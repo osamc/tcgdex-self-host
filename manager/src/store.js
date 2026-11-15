@@ -27,8 +27,9 @@ export function createStore(dir) {
     cache = null
   }
 
+  let watcher = null
   try {
-    const watcher = fs.watch(root, { recursive: true }, () => invalidate())
+    watcher = fs.watch(root, { recursive: true }, () => invalidate())
     watcher.on('error', () => {})
     watcher.unref?.()
   } catch {
@@ -81,6 +82,11 @@ export function createStore(dir) {
   return {
     root,
     invalidate,
+    close() {
+      // An open recursive watcher can keep the process alive on Windows.
+      watcher?.close()
+      watcher = null
+    },
     problems() {
       return readCatalog().problems.map((problem) => ({ ...problem }))
     },

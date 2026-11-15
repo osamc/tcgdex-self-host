@@ -86,7 +86,9 @@ Languages are the ones TCGdex publishes: `en`, `fr`, `es`, `es-mx`, `it`, `pt`, 
 
 A saved card uses the same JSON shape as `GET /v2/{lang}/cards/{id}`. Saving an id that already exists upstream replaces that card everywhere the REST catalog lists it. A new id is added next to the official data. Sets and series work the same way. Cards inside a set are collected from the card files, so a set file does not embed its card list.
 
-To override an official card, use **Import upstream** in the UI (for example `swsh3-136`), edit the JSON, and save.
+To override an official card, open **Browse sets** in the UI, pick a set, and click the card. The editor opens with the official record filled in; change what you need and save. Overridden cards are marked in the set view, **Compare with official** lists every field you changed (with a per-field reset), and **Revert to official** deletes the override. You can also type an id such as `swsh3-136` into **Open by id** on the Cards, Sets, or Series page. **Add card** on a set view starts a new card with the set and next number filled in.
+
+Browsing in the manager uses `/manage/api/browse/{lang}/{cards|sets|series}[/{id}]`, which returns the same merged data as the public API (tagged with `_local: "override" | "custom"`) without counting as API traffic. Pages have their own URLs (`/manage#/browse/en/swsh3`, `/manage#/edit/cards/en/swsh3-136`), so the back button and bookmarks work. `Ctrl+S` saves in the editor, and artwork can be dropped onto the preview to upload it.
 
 Uploaded images are served from `/assets/<name>`. The card `image` field is stored as that base path, without a file extension, matching official TCGdex. Clients then request:
 

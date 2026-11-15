@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { timingSafeEqual } from 'node:crypto'
+import { resolveRequest } from './catalog.js'
 import { IMAGE_TYPES, publicAssetPath, resolveImageFile, safeImageRelPath, writeImageFile } from './images.js'
 import { isLanguage } from './languages.js'
 import { isSafeId, validateCard, validateSerie, validateSet } from './store.js'
@@ -68,6 +69,10 @@ export async function handleManagement(req, res, ctx) {
   }
   if (req.method === 'GET' && action === 'catalog') {
     sendJson(res, 200, ctx.store.list())
+    return true
+  }
+  if (req.method === 'GET' && action === 'browse') {
+    await handleBrowse(parts.slice(3), url.search, res, ctx)
     return true
   }
   if (req.method === 'POST' && action === 'import') {
@@ -143,6 +148,55 @@ async function annotate(kind, lang, id, body, upstream) {
   }
   if (!saved.updated) saved.updated = saved._meta.savedAt
   return saved
+}
+
+const BROWSE_ENDPOINTS = new Set(['cards', 'sets', 'series'])
+
+/**
+ * Merged catalog view for the management UI. It goes through the same merge as
+ * the public API but is not counted as API traffic, and every card or set is
+ * tagged with `_local` ("override" or "custom") when a local file backs it.
+ */
+async function handleBrowse(segments, search, res, ctx) {
+  const [lang, endpoint, id] = segments
+  if (!isLanguage(lang) || !BROWSE_ENDPOINTS.has(endpoint) || segments.length > 3 || (id && !isSafeId(id))) {
+    sendJson(res, 400, { error: 'expected /browse/<lang>/<cards|sets|series>[/<id>]' })
+    return
+  }
+  const target = `/v2/${lang}/${endpoint}${id ? `/${encodeURIComponent(id)}` : ''}${search}`
+  const fetchUpstream = (next) => ctx.upstream.request(next.pathname, next.search)
+  let result
+  try {
+    result = await resolveRequest({ method: 'GET', targetUrl: target, store: ctx.store, fetchUpstream })
+    if (!result) {
+      const response = await fetchUpstream(new URL(target, 'http://manager.local'))
+      result = { status: response.status, body: response.json ?? { error: response.text } }
+    }
+  } catch {
+    sendJson(res, 502, { error: 'upstream is unavailable' })
+    return
+  }
+  const local = localIndex(ctx.store.snapshot(lang))
+  sendJson(res, result.status, tagLocal(result.body, endpoint, id, local))
+}
+
+function localIndex(catalog) {
+  const index = (items) => new Map(items.map((item) => [String(item.id).toLowerCase(), item._meta?.upstream ? 'override' : 'custom']))
+  return { cards: index(catalog.cards), sets: index(catalog.sets), series: index(catalog.series) }
+}
+
+function tagLocal(body, endpoint, id, local) {
+  const tag = (item, kind) => {
+    if (!item || typeof item !== 'object' || !item.id) return item
+    const status = local[kind].get(String(item.id).toLowerCase())
+    return status ? { ...item, _local: status } : item
+  }
+  if (Array.isArray(body)) return body.map((item) => tag(item, endpoint))
+  if (!body || typeof body !== 'object' || !id) return body
+  const tagged = tag(body, endpoint)
+  if (Array.isArray(tagged.cards)) tagged.cards = tagged.cards.map((card) => tag(card, 'cards'))
+  if (Array.isArray(tagged.sets)) tagged.sets = tagged.sets.map((set) => tag(set, 'sets'))
+  return tagged
 }
 
 async function handleImport(req, res, ctx) {

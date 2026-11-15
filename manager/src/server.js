@@ -90,6 +90,8 @@ export function createApp(options) {
     }
   })
 
+  server.on('close', () => store.close())
+
   return { server, store, metrics, upstream }
 }
 
